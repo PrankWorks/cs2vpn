@@ -59,9 +59,43 @@
 # Only this /24 is listed: the rest of the PhoenixNAP block is shared with US/EU sites.
 131.153.46.0/24      # PhoenixNAP SG (community server 131.153.46.204)
 # --- Singapore hosts seen on servers.upkk.com (country=SG, 2026-09-24: 122 community servers, 11 hosts) ---
-149.102.250.0/24     # Datacamp/CDN77 Singapore (CDNEXT-SGP) - 111 of the 122 listed servers
 66.42.48.0/20        # Vultr Singapore (SGP_VULTR_CUST)
 203.27.106.0/24      # GSL Networks Singapore
 103.107.199.0/24     # GSL Networks Singapore
 131.153.47.0/24      # PhoenixNAP SG (second /24 seen)
 5.223.0.0/16         # Hetzner Cloud Singapore (CLOUD-SIN; 5.223.x is the Singapore location)
+
+# --- Datacamp / CDN77 Singapore: ALL registered SGP blocks (RIPE netname CDN77-SGP / CDNEXT-SGP + ARIN CDNEXT-SGP*) ---
+# CONFIRMED FACEIT SGP game server 79.127.213.54 lives here (live match, 2026-09-24). Also 111 of 122 SG community servers (149.102.250.x).
+46.151.192.0/24      # Datacamp SG
+79.127.170.0/24      # Datacamp SG
+79.127.213.0/24      # Datacamp SG
+79.127.230.0/24      # Datacamp SG
+79.127.235.0/24      # Datacamp SG
+95.173.218.0/24      # Datacamp SG
+138.199.24.0/23      # Datacamp SG
+138.199.46.0/24      # Datacamp SG
+152.233.14.0/23      # Datacamp SG
+152.233.68.0/23      # Datacamp SG
+169.150.207.0/24     # Datacamp SG
+207.211.208.0/24     # Datacamp SG
+37.19.201.0/24       # Datacamp SG
+95.177.89.0/24       # Datacamp SG
+95.177.122.0/24      # Datacamp SG
+138.199.60.0/24      # Datacamp SG
+138.199.61.0/24      # Datacamp SG
+152.233.9.0/24       # Datacamp SG
+152.233.86.0/24      # Datacamp SG
+156.146.56.0/23      # Datacamp SG
+217.79.105.0/24      # Datacamp SG
+149.102.231.0/24     # Datacamp SG
+149.102.250.0/24     # Datacamp SG
+149.102.255.0/24     # Datacamp SG
+149.34.253.0/24      # Datacamp SG
+149.34.254.0/23      # Datacamp SG
+149.50.211.0/24      # Datacamp SG
+149.50.213.0/24      # Datacamp SG
+149.88.106.0/23      # Datacamp SG
+149.88.23.0/24       # Datacamp SG
+149.88.31.0/24       # Datacamp SG
+149.88.99.0/24       # Datacamp SG
