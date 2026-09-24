@@ -21,8 +21,8 @@ $ScriptUrl = ($ListUrl -replace 'split-allowed-ips\.txt$', 'dist/start-tunnel.ps
 if (-not $NoUpdate -and -not $env:CSVPN_UPDATED -and $PSCommandPath) {
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $latest = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri $ScriptUrl).Content
-    $mine = [IO.File]::ReadAllText($PSCommandPath)
+    $latest = ((Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri $ScriptUrl).Content).TrimStart([char]0xFEFF)
+    $mine = ([IO.File]::ReadAllText($PSCommandPath)).TrimStart([char]0xFEFF)
     if ($latest.Length -gt 2000 -and ($latest.Trim() -replace "`r","") -ne ($mine.Trim() -replace "`r","")) {
       [IO.File]::WriteAllText($PSCommandPath, $latest, (New-Object Text.UTF8Encoding $true))
       Write-Host "スクリプトを最新版に更新しました。再実行します..."
