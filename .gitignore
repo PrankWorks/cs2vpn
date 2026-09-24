@@ -1,0 +1,5 @@
+# WireGuard client configs contain private keys - never commit
+clients/
+*.conf
+!cfn/*.yaml
+bundles/

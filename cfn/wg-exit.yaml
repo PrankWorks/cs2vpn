@@ -1,0 +1,258 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  csvpn - WireGuard exit node for CS2/FACEIT (dedicated VPC, IPv4 EIP + IPv6,
+  SSM access, client configs generated on first boot).
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t4g.micro
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64
+  ClientNames:
+    Type: String
+    Default: owner,mate1,mate2
+    Description: Comma separated WireGuard client names (one peer each).
+  WgPort:
+    Type: Number
+    Default: 51820
+  WgSubnet:
+    Type: String
+    Default: 10.66.0
+    Description: First three octets of the tunnel /24 (server = .1, clients = .11, .12, ...).
+  WgMtu:
+    Type: Number
+    Default: 1380
+    Description: Tunnel MTU. 1380 leaves headroom for IPv4-over-IPv6 (MAP-E / v6plus) home lines.
+  AllowIcmpFrom:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR allowed to ping the node (for route verification).
+  ScheduleEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Start/stop the instance on a daily schedule (JST) to save EC2 hours.
+  StartCronJst:
+    Type: String
+    Default: "cron(0 19 * * ? *)"
+  StopCronJst:
+    Type: String
+    Default: "cron(0 2 * * ? *)"
+
+Conditions:
+  UseSchedule: !Equals [!Ref ScheduleEnabled, "true"]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.99.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-vpc" }]
+  VpcIpv6:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      VpcId: !Ref Vpc
+      AmazonProvidedIpv6CidrBlock: true
+  Igw:
+    Type: AWS::EC2::InternetGateway
+  IgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: { VpcId: !Ref Vpc, InternetGatewayId: !Ref Igw }
+  Subnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: VpcIpv6
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.99.0.0/26
+      Ipv6CidrBlock: !Select [0, !Cidr [!Select [0, !GetAtt Vpc.Ipv6CidrBlocks], 1, 64]]
+      AssignIpv6AddressOnCreation: true
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public" }]
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc }
+  Route4:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttach
+    Properties: { RouteTableId: !Ref RouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref Igw }
+  Route6:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttach
+    Properties: { RouteTableId: !Ref RouteTable, DestinationIpv6CidrBlock: "::/0", GatewayId: !Ref Igw }
+  SubnetRoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref Subnet, RouteTableId: !Ref RouteTable }
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: WireGuard + ICMP
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: udp, FromPort: !Ref WgPort, ToPort: !Ref WgPort, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: udp, FromPort: !Ref WgPort, ToPort: !Ref WgPort, CidrIpv6: "::/0" }
+        - { IpProtocol: icmp, FromPort: -1, ToPort: -1, CidrIp: !Ref AllowIcmpFrom }
+        - { IpProtocol: icmpv6, FromPort: -1, ToPort: -1, CidrIpv6: "::/0" }
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-sg" }]
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: { Roles: [!Ref Role] }
+
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: [Route4, Route6]
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SourceDestCheck: false
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref Subnet
+          GroupSet: [!Ref SecurityGroup]
+          AssociatePublicIpAddress: true
+          Ipv6AddressCount: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 8, VolumeType: gp3, DeleteOnTermination: true }
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-wg" }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > /var/log/csvpn-setup.log 2>&1
+          dnf install -y wireguard-tools iptables-nft mtr traceroute bind-utils tcpdump
+          cat > /etc/sysctl.d/99-wg.conf <<S
+          net.ipv4.ip_forward = 1
+          net.ipv4.conf.all.rp_filter = 0
+          net.core.rmem_max = 4194304
+          net.core.wmem_max = 4194304
+          S
+          sysctl --system
+          umask 077
+          mkdir -p /etc/wireguard/clients
+          cd /etc/wireguard
+          [ -f server.key ] || wg genkey | tee server.key | wg pubkey > server.pub
+          SPUB=$(cat server.pub); SKEY=$(cat server.key)
+          TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+          PUB4=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          MAC=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/mac)
+          PUB6=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/network/interfaces/macs/$MAC/ipv6s | head -1 || true)
+          NIC=$(ip -o -4 route show default | awk '{print $5}')
+          cat > wg0.conf <<S
+          [Interface]
+          Address = ${WgSubnet}.1/24
+          ListenPort = ${WgPort}
+          PrivateKey = $SKEY
+          MTU = ${WgMtu}
+          PostUp = iptables -t nat -A POSTROUTING -s ${WgSubnet}.0/24 -o $NIC -j MASQUERADE; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t mangle -A FORWARD -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+          PostDown = iptables -t nat -D POSTROUTING -s ${WgSubnet}.0/24 -o $NIC -j MASQUERADE; iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t mangle -D FORWARD -o wg0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+          S
+          i=11
+          for n in $(echo "${ClientNames}" | tr ',' ' '); do
+            CKEY=$(wg genkey); CPUB=$(echo "$CKEY" | wg pubkey); PSK=$(wg genpsk)
+            cat >> wg0.conf <<S
+
+          # client: $n
+          [Peer]
+          PublicKey = $CPUB
+          PresharedKey = $PSK
+          AllowedIPs = ${WgSubnet}.$i/32
+          S
+            # Two configs per client: full tunnel, and split tunnel whose AllowedIPs get filled in locally.
+            for mode in full split; do
+              if [ $mode = full ]; then AIP="0.0.0.0/0"; else AIP="__SPLIT_ALLOWED_IPS__"; fi
+              cat > clients/$n-$mode.conf <<S
+          [Interface]
+          PrivateKey = $CKEY
+          Address = ${WgSubnet}.$i/32
+          MTU = ${WgMtu}
+          DNS = 1.1.1.1
+
+          [Peer]
+          PublicKey = $SPUB
+          PresharedKey = $PSK
+          Endpoint = $PUB4:${WgPort}
+          AllowedIPs = $AIP
+          PersistentKeepalive = 25
+          S
+            done
+            i=$((i+1))
+          done
+          echo "$PUB6" > /etc/wireguard/public-ipv6
+          systemctl enable --now wg-quick@wg0
+          echo CSVPN_SETUP_DONE
+
+  Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-eip" }]
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Condition: UseSchedule
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-stop-wg-instance
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:StartInstances, ec2:StopInstances]
+                Resource: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}"
+  StartSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: UseSchedule
+    Properties:
+      Name: !Sub "${AWS::StackName}-start"
+      Description: Start the WireGuard node (JST)
+      ScheduleExpression: !Ref StartCronJst
+      ScheduleExpressionTimezone: Asia/Tokyo
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"InstanceIds": ["${Instance}"]}'
+  StopSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: UseSchedule
+    Properties:
+      Name: !Sub "${AWS::StackName}-stop"
+      Description: Stop the WireGuard node (JST)
+      ScheduleExpression: !Ref StopCronJst
+      ScheduleExpressionTimezone: Asia/Tokyo
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"InstanceIds": ["${Instance}"]}'
+
+Outputs:
+  InstanceId: { Value: !Ref Instance }
+  PublicIp: { Value: !Ref Eip }
+  Region: { Value: !Ref AWS::Region }

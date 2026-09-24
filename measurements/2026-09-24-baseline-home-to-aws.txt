@@ -1,0 +1,26 @@
+== ping 52.74.31.125
+    Minimum = 87ms, Maximum = 88ms, Average = 87ms
+== tracert 52.74.31.125
+
+Tracing route to 52.74.31.125 over a maximum of 20 hops
+
+  1     1 ms    <1 ms    <1 ms  192.168.0.1 
+  2    14 ms    13 ms    14 ms  106.187.15.110 
+  3    13 ms    13 ms    13 ms  106.187.15.109 
+  4    14 ms    13 ms    13 ms  106.139.194.153 
+ 17    82 ms    81 ms    82 ms  52.74.31.125 
+
+Trace complete.
+== ping 54.65.66.233
+    Minimum = 14ms, Maximum = 15ms, Average = 14ms
+== tracert 54.65.66.233
+
+Tracing route to 54.65.66.233 over a maximum of 20 hops
+
+  1     1 ms    <1 ms    <1 ms  192.168.0.1 
+  2    13 ms    13 ms    13 ms  106.187.15.110 
+  3    13 ms    13 ms    14 ms  106.187.15.109 
+  4    13 ms    14 ms    14 ms  106.139.194.153 
+ 13    14 ms    14 ms    15 ms  54.65.66.233 
+
+Trace complete.

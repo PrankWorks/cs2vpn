@@ -1,0 +1,13 @@
+# Destinations routed through the Singapore exit node (split tunnel).
+# One CIDR per line, '#' comments allowed. Regenerate client configs with scripts/fill-split.sh after editing.
+# Verify the real FACEIT server IP with `status` in the CS2 console during a match and add its /24 here.
+139.99.0.0/16        # OVH Singapore/APAC  (FACEIT SGP, e.g. 139.99.112.177)
+103.5.12.0/22        # OVH Singapore edge
+51.79.128.0/17       # OVH APAC (FACEIT SGP, e.g. 51.79.176.5)
+15.235.128.0/17      # OVH APAC
+103.14.247.0/24      # SG.GS               (FACEIT SGP, e.g. 103.14.247.211)
+23.106.253.0/24      # Leaseweb Singapore  (FACEIT SGP, e.g. 23.106.253.161)
+23.106.255.0/24      # Leaseweb Singapore
+35.240.128.0/17      # Google Cloud asia-southeast1 (FACEIT SGP, e.g. 35.240.144.156)
+35.187.224.0/19      # Google Cloud asia-southeast1 (e.g. 35.187.231.7)
+103.10.124.0/24      # Valve SDR relay "sgp" (official MM / Premier)
