@@ -8,10 +8,33 @@
 param(
   [string]$Conf,
   [switch]$NoPause,
+  [switch]$NoUpdate,
   [int]$Candidates = 12,
-  [int]$MaxMs = 150
+  [int]$MaxMs = 150,
+  [string]$ListUrl = "https://raw.githubusercontent.com/PrankWorks/cs2vpn/master/split-allowed-ips.txt"
 )
 $ErrorActionPreference = 'Continue'
+
+# Self-update: fetch the latest copy of this script from the public repo and re-run it if it changed.
+# Runs once per invocation (guarded by CSVPN_UPDATED) and only replaces the file next to the .conf.
+$ScriptUrl = ($ListUrl -replace 'split-allowed-ips\.txt$', 'dist/start-tunnel.ps1')
+if (-not $NoUpdate -and -not $env:CSVPN_UPDATED -and $PSCommandPath) {
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $latest = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri $ScriptUrl).Content
+    $mine = [IO.File]::ReadAllText($PSCommandPath)
+    if ($latest.Length -gt 2000 -and ($latest.Trim() -replace "`r","") -ne ($mine.Trim() -replace "`r","")) {
+      [IO.File]::WriteAllText($PSCommandPath, $latest, (New-Object Text.UTF8Encoding $true))
+      Write-Host "スクリプトを最新版に更新しました。再実行します..."
+      $env:CSVPN_UPDATED = '1'
+      $args2 = @()
+      foreach ($k in $PSBoundParameters.Keys) { $v = $PSBoundParameters[$k]; if ($v -is [switch]) { if ($v) { $args2 += "-$k" } } else { $args2 += "-$k"; $args2 += "$v" } }
+      & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @args2
+      exit $LASTEXITCODE
+    }
+  } catch { }
+}
+
 $wgui  = "C:\Program Files\WireGuard\wireguard.exe"
 $wg    = "C:\Program Files\WireGuard\wg.exe"
 $gw    = "10.66.0.1"
@@ -33,6 +56,25 @@ if (-not $Conf) {
 $Conf = (Resolve-Path $Conf).Path
 $name = [IO.Path]::GetFileNameWithoutExtension($Conf)
 Write-Host "設定: $name"
+
+# Split configs: refresh AllowedIPs from the shared list on GitHub so everyone picks up new destinations
+# just by re-running this script. The private key and everything else in the .conf stay untouched.
+$curAip = ((Get-Content $Conf | Where-Object { $_ -match '^\s*AllowedIPs' }) -replace '^\s*AllowedIPs\s*=\s*','').Trim()
+if (-not $NoUpdate -and $curAip -ne '0.0.0.0/0') {
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $body = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri $ListUrl).Content
+    $cidrs = @($body -split "`n" | ForEach-Object { ($_ -replace '#.*','').Trim() } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$' } | Select-Object -Unique)
+    if ($cidrs.Count -ge 5) {
+      $newAip = (@('10.66.0.0/24') + $cidrs) -join ', '
+      if ($newAip -ne $curAip) {
+        $txt = Get-Content $Conf | ForEach-Object { if ($_ -match '^\s*AllowedIPs') { "AllowedIPs = $newAip" } else { $_ } }
+        Set-Content -Path $Conf -Value $txt -Encoding ASCII
+        Write-Host ("宛先リストを更新しました ({0} 件)。" -f $cidrs.Count)
+      } else { Write-Host ("宛先リストは最新です ({0} 件)。" -f $cidrs.Count) }
+    } else { Write-Host "宛先リストの取得結果が小さすぎるので無視します。" }
+  } catch { Write-Host "宛先リストの取得に失敗 (オフライン?)。今の設定のまま続けます。" }
+}
 
 function Get-Rtt {
   # min of 4 pings; -1 when unreachable

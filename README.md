@@ -16,7 +16,7 @@ scripts/make-bundle.sh mate1      # bundles/mate1/ を作って本人に渡す
 aws cloudformation delete-stack --region ap-southeast-1 --stack-name csvpn-sg
 ```
 
-配布された側の手順は [docs/setup-guide.md](docs/setup-guide.md)。`start-tunnel.bat` を実行するだけ。
+配布された側の手順は [docs/setup-guide.md](docs/setup-guide.md)。`start-tunnel.bat` を実行するだけ。宛先リストが更新されたときも同じ bat を再実行するだけでよい。
 
 ## ファイル
 
@@ -24,8 +24,8 @@ aws cloudformation delete-stack --region ap-southeast-1 --stack-name csvpn-sg
 |---|---|
 | `cfn/wg-exit.yaml` | CloudFormation。VPC、EC2 (WireGuard)、EIP、19:00〜02:00 JST の起動停止スケジュール |
 | `dist/start-tunnel.{bat,ps1}` | クライアント起動スクリプト。最速経路のポートを選んで保存する |
-| `scripts/` | 設定取得・split 用 CIDR 埋め込み・計測・バンドル作成 |
-| `split-allowed-ips.txt` | split トンネルでシンガポール経由にする宛先 |
+| `scripts/` | 設定取得・split 反映 (apply-split)・計測・バンドル作成・check-tunnel (ルート検証) |
+| `split-allowed-ips.txt` | split トンネルでシンガポール経由にする宛先。編集して push すれば、各自が `start-tunnel.bat` を再実行するだけで反映される (bat が GitHub から最新を取得) |
 | `measurements/` | 計測ログ |
 
 稼働中: スタック `csvpn-sg`、EIP `52.74.31.125`、UDP 51820。月およそ $7 (スケジュール停止込み)。

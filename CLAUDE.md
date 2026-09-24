@@ -62,6 +62,10 @@
 - `wireguard.exe /installtunnelservice <任意パス>` だけだと WireGuard アプリの一覧に出ない。アプリは `C:\Program Files\WireGuard\Data\Configurations` の `.conf.dpapi` しか見ないので、start-tunnel.ps1 は平文 conf をそこに置き、WireGuardManager サービスを再起動して暗号化させ、`.conf.dpapi` からサービスを起動している。
 - アプリの保存先にある旧 `.conf.dpapi` は WireGuardManager を止めただけでは削除できず (UI プロセスが握っている)、旧 AllowedIPs のまま起動してしまう事故があった (2026-09-24 夜、PhoenixNAP の CIDR を足したのに載らなかった)。start-tunnel.ps1 は wireguard.exe を全部止めて takeown/icacls で消し、起動後に AllowedIPs の各 CIDR が Get-NetRoute に載っているか検証して警告する。
 - 夜間はサービス再起動のたびに外れ経路 (250ms) を引くことが続いた (6回連続) ため、最終起動後に RTT が悪ければ再起動せず `wg set listen-port` を回して良い経路に落ち着かせ、その時のポートを conf に書く。
+- **何が「効いている設定」か (2026-09-25 再調査)**: トンネルサービスのバイナリパスは `/tunnelservice "C:\Program Files\WireGuard\Data\Configurations\<name>.conf.dpapi"` で、有効なのはアプリ保存先の暗号化コピーだけ。`clients/*.conf` や `bundles/` の conf を編集しても、start-tunnel.ps1 で再登録するか GUI で再インポートするまで何も変わらない。GUI の「編集」で保存した内容はアプリが再暗号化して即反映する (GUI 上の AllowedIPs = 実際に効いている AllowedIPs)。
+- 2026-09-25 00:05 に登録し直した直後は 91 ルートを確認したのに、00:35 の時点でカーネルの AllowedIPs が初期リストの 11 件に戻っていた。ログにはその間のトンネル再起動が無く、原因は特定できていない (GUI での再インポート/編集、または保存先の再暗号化時に古い内容が使われた可能性)。`scripts/check-tunnel.ps1` (非管理者で実行可) が conf とルートの差分を出すので、プレイ前に確認する。差分があれば start-tunnel.ps1 で再登録する。
+- 2026-09-25: start-tunnel.ps1 は起動時に GitHub の raw `split-allowed-ips.txt` (master) を取得し、split conf の AllowedIPs を `10.66.0.0/24 + リスト` で書き換えてから登録する (`-NoUpdate` で抑止、full conf は対象外、取得失敗時は現状維持)。したがって宛先追加の手順は「リストを編集 → commit & push → 各自が bat を再実行」。配布済みバンドルの再配布は不要。scripts/apply-split.sh はオフライン用/バンドル再生成用。
+- `wg set <name> peer <pub> allowed-ips ...` はカーネル側の AllowedIPs には即時に効くが、Windows のルートは追加されない (実験済み: 192.0.2.0/24 を足しても Find-NetRoute は物理 NIC を返す) ので、動的追加には New-NetRoute も必要。再起動すると保存先の内容に戻る。
 - 所有者の PC では所有者用の full conf がアプリに登録済み (2026-09-24 時点、ポート 42381)。full は全通信を通すので、ノードが 02:00 に停止すると WireGuard を無効化するまでネット全体が落ちる。普段は split を推奨。
 
 ## FACEIT サーバー IP について
