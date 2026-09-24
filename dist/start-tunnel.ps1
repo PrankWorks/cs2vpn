@@ -18,6 +18,9 @@ $ErrorActionPreference = 'Continue'
 # Self-update: fetch the latest copy of this script from the public repo and re-run it if it changed.
 # Runs once per invocation (guarded by CSVPN_UPDATED) and only replaces the file next to the .conf.
 $ScriptUrl = ($ListUrl -replace 'split-allowed-ips\.txt$', 'dist/start-tunnel.ps1')
+# raw.githubusercontent.com is cached by a CDN for several minutes; a changing query string bypasses it.
+$cb = "?t=" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$ScriptUrl += $cb; $ListUrl += $cb
 if (-not $NoUpdate -and -not $env:CSVPN_UPDATED -and $PSCommandPath) {
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
