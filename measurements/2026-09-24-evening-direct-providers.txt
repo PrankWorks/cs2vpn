@@ -1,0 +1,85 @@
+# 2026-09-24 20:00-20:30 JST, direct (tunnel off), home -> Singapore ping hosts of VPS providers
+== Vultr 45.32.100.168
+    Minimum = 190ms, Maximum = 190ms, Average = 190ms
+ 14   190 ms   190 ms     *     45.32.98.222 
+ 15   190 ms   190 ms     *     45.32.100.168 
+ 16   190 ms   190 ms     *     45.32.100.168 
+ 17   191 ms   190 ms     *     45.32.100.168 
+ 18   190 ms   190 ms     *     45.32.100.168 
+
+== Linode 139.162.23.4
+    Minimum = 81ms, Maximum = 83ms, Average = 82ms
+ 12    77 ms    77 ms    77 ms  104.74.134.83 
+ 13    80 ms    80 ms     *     104.74.134.133 
+ 14    79 ms    79 ms    78 ms  23.56.138.25 
+ 18    82 ms    82 ms    82 ms  139.162.23.4 
+
+Trace complete.
+== Hetzner 5.223.7.195
+    Minimum = 156ms, Maximum = 162ms, Average = 159ms
+ 11     *        *      164 ms  129.250.7.66 
+ 12   195 ms   184 ms     *     129.250.6.65 
+ 13   164 ms   184 ms     *     116.51.31.51 
+ 15   165 ms   165 ms   165 ms  5.223.7.195 
+
+Trace complete.
+== Leaseweb-mirror 103.254.153.18
+    Minimum = 183ms, Maximum = 206ms, Average = 190ms
+ 14   182 ms   183 ms     *     103.254.153.18 
+ 15   187 ms   183 ms     *     103.254.153.18 
+ 16   183 ms   184 ms     *     103.254.153.18 
+ 17   186 ms   186 ms     *     103.254.153.18 
+ 18   188 ms   188 ms     *     103.254.153.18 
+
+== Leaseweb-23 23.106.253.161
+    Packets: Sent = 10, Received = 1, Lost = 9 (90% loss),
+  6    13 ms    15 ms    14 ms  27.85.133.214 
+  7    13 ms    14 ms    14 ms  216.6.52.5 
+  8    79 ms    79 ms    79 ms  216.6.54.3 
+ 11     *      187 ms     *     23.106.255.5 
+
+Trace complete.
+== Hostens 212.237.232.111
+    Minimum = 279ms, Maximum = 280ms, Average = 279ms
+ 13   286 ms     *      286 ms  213.226.157.73 
+ 14   290 ms     *      290 ms  81.16.238.161 
+ 15   280 ms     *      279 ms  31.14.178.152 
+ 16   279 ms     *      279 ms  212.237.232.111 
+
+Trace complete.
+== OVH 15.235.182.181
+    Minimum = 144ms, Maximum = 157ms, Average = 149ms
+  9     *        *      194 ms  202.84.136.26 
+ 10   192 ms     *      382 ms  202.84.207.182 
+ 11   147 ms   147 ms     *     103.5.15.96 
+ 16   164 ms   162 ms   164 ms  103.5.15.5 
+
+Trace complete.
+== GCP 35.240.144.156
+    Minimum = 88ms, Maximum = 89ms, Average = 88ms
+  1    <1 ms    <1 ms    <1 ms  192.168.0.1 
+  2    13 ms    13 ms    13 ms  106.187.15.110 
+  3    13 ms    13 ms    13 ms  106.187.15.109 
+  4    89 ms    89 ms    88 ms  35.240.144.156 
+
+Trace complete.
+== AWS-EIP 52.74.31.125
+    Minimum = 93ms, Maximum = 95ms, Average = 94ms
+  2    13 ms    14 ms    14 ms  106.187.15.110 
+  3    13 ms    13 ms    13 ms  106.187.15.109 
+  4    13 ms    13 ms    13 ms  106.139.194.153 
+ 17    94 ms    95 ms    94 ms  52.74.31.125 
+
+Trace complete.
+
+# second sample (20 pings)
+== Linode 139.162.23.4
+    Minimum = 82ms, Maximum = 82ms, Average = 82ms
+== GCP 35.240.144.156
+    Minimum = 87ms, Maximum = 88ms, Average = 87ms
+== AWS-EIP 52.74.31.125
+    Minimum = 94ms, Maximum = 95ms, Average = 94ms
+== OVH 15.235.182.181
+    Minimum = 150ms, Maximum = 156ms, Average = 152ms
+== Vultr 45.32.100.168
+    Minimum = 190ms, Maximum = 191ms, Average = 190ms

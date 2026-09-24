@@ -5,9 +5,63 @@
 103.5.12.0/22        # OVH Singapore edge
 51.79.128.0/17       # OVH APAC (FACEIT SGP, e.g. 51.79.176.5)
 15.235.128.0/17      # OVH APAC
-103.14.247.0/24      # SG.GS               (FACEIT SGP, e.g. 103.14.247.211)
-23.106.253.0/24      # Leaseweb Singapore  (FACEIT SGP, e.g. 23.106.253.161)
-23.106.255.0/24      # Leaseweb Singapore
-35.240.128.0/17      # Google Cloud asia-southeast1 (FACEIT SGP, e.g. 35.240.144.156)
-35.187.224.0/19      # Google Cloud asia-southeast1 (e.g. 35.187.231.7)
+103.14.246.0/23      # SG.GS               (FACEIT SGP, e.g. 103.14.247.211) - whole block
+23.106.252.0/22      # Leaseweb Singapore  (FACEIT SGP, e.g. 23.106.253.161) - whole block
+103.254.152.0/22     # Leaseweb Singapore  - whole block
+# Google Cloud asia-southeast1: all published IPv4 prefixes (https://www.gstatic.com/ipranges/cloud.json, 2026-09-24)
+34.1.128.0/20        # Google Cloud asia-southeast1
+34.1.192.0/20        # Google Cloud asia-southeast1
+34.2.16.0/20         # Google Cloud asia-southeast1
+34.2.128.0/17        # Google Cloud asia-southeast1
+34.21.128.0/17       # Google Cloud asia-southeast1
+34.87.0.0/17         # Google Cloud asia-southeast1
+34.87.128.0/18       # Google Cloud asia-southeast1
+34.104.58.0/23       # Google Cloud asia-southeast1
+34.104.106.0/23      # Google Cloud asia-southeast1
+34.124.42.0/23       # Google Cloud asia-southeast1
+34.124.128.0/17      # Google Cloud asia-southeast1
+34.126.64.0/18       # Google Cloud asia-southeast1
+34.126.128.0/18      # Google Cloud asia-southeast1
+34.128.44.0/23       # Google Cloud asia-southeast1
+34.128.60.0/23       # Google Cloud asia-southeast1
+34.142.128.0/17      # Google Cloud asia-southeast1
+34.143.128.0/17      # Google Cloud asia-southeast1
+34.152.104.0/23      # Google Cloud asia-southeast1
+34.153.40.0/23       # Google Cloud asia-southeast1
+34.153.232.0/23      # Google Cloud asia-southeast1
+34.157.82.0/23       # Google Cloud asia-southeast1
+34.157.88.0/23       # Google Cloud asia-southeast1
+34.157.210.0/23      # Google Cloud asia-southeast1
+34.158.32.0/19       # Google Cloud asia-southeast1
+34.177.72.0/23       # Google Cloud asia-southeast1
+34.177.80.0/20       # Google Cloud asia-southeast1
+34.177.96.0/20       # Google Cloud asia-southeast1
+34.183.80.0/24       # Google Cloud asia-southeast1
+34.184.75.0/24       # Google Cloud asia-southeast1
+35.185.176.0/20      # Google Cloud asia-southeast1
+35.186.144.0/20      # Google Cloud asia-southeast1
+35.187.224.0/19      # Google Cloud asia-southeast1
+35.197.128.0/19      # Google Cloud asia-southeast1
+35.198.192.0/18      # Google Cloud asia-southeast1
+35.213.128.0/18      # Google Cloud asia-southeast1
+35.220.24.0/23       # Google Cloud asia-southeast1
+35.234.192.0/20      # Google Cloud asia-southeast1
+35.240.128.0/17      # Google Cloud asia-southeast1
+35.242.24.0/23       # Google Cloud asia-southeast1
+35.247.128.0/18      # Google Cloud asia-southeast1
+136.85.0.0/17        # Google Cloud asia-southeast1
+136.92.128.0/17      # Google Cloud asia-southeast1
+136.110.0.0/18       # Google Cloud asia-southeast1
 103.10.124.0/24      # Valve SDR relay "sgp" (official MM / Premier)
+# --- PhoenixNAP Singapore (AS59210) ---
+# 131.153.46.204:27015 is a Singapore COMMUNITY CS2 server found on a server-list site (servers.upkk.com), NOT a FACEIT server.
+# Kept because it is in Singapore. Measured 2026-09-24 evening: direct via NTT 81-82 ms, via the node ~81-83 ms; in-game ping was better direct.
+# Only this /24 is listed: the rest of the PhoenixNAP block is shared with US/EU sites.
+131.153.46.0/24      # PhoenixNAP SG (community server 131.153.46.204)
+# --- Singapore hosts seen on servers.upkk.com (country=SG, 2026-09-24: 122 community servers, 11 hosts) ---
+149.102.250.0/24     # Datacamp/CDN77 Singapore (CDNEXT-SGP) - 111 of the 122 listed servers
+66.42.48.0/20        # Vultr Singapore (SGP_VULTR_CUST)
+203.27.106.0/24      # GSL Networks Singapore
+103.107.199.0/24     # GSL Networks Singapore
+131.153.47.0/24      # PhoenixNAP SG (second /24 seen)
+5.223.0.0/16         # Hetzner Cloud Singapore (CLOUD-SIN; 5.223.x is the Singapore location)

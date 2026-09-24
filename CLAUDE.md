@@ -34,6 +34,21 @@
 
 出口ノード → OVH SG / Valve SDR sgp / GCP SG / Leaseweb SG はいずれも 1〜2 ms。
 
+夜 (2026-09-24 20:00〜20:30 JST、直結) に各社のシンガポール公開 ping ホストを測った結果。昼より KDDI のトランジット経由 (Telstra/PCCW/NTT) が大きく悪化する一方、直接ピアしている網は変わらない:
+
+| 事業者 (SG) | 夜の直結 RTT | 経路 |
+|---|---|---|
+| Linode/Akamai 139.162.23.4 | 82 ms (2回とも) | Akamai 網 104.74.x 経由。最良 |
+| GCP 35.240.144.156 | 87〜88 ms | Google 直接ピア |
+| AWS EIP 52.74.31.125 | 94 ms (昼は 82〜88) | 4ホップ目で AWS 網 |
+| OVH 15.235.182.181 | 144〜157 ms (昼は 94〜100) | Telstra/PCCW |
+| Hetzner 5.223.7.195 | 156〜165 ms | NTT 129.250.x 経由 |
+| Vultr 45.32.100.168 | 190 ms | |
+| Leaseweb 103.254.153.18 / 23.106.253.161 | 183〜206 ms / 90% ロス (昼は 81 ms) | Tata 経由が夜に崩れる |
+| Hostens 212.237.232.111 | 279 ms | |
+
+含意: 「ラグい」の正体は夜間に KDDI のトランジット経路が劣化することで、FACEIT サーバーがその経路上 (OVH/Leaseweb 系) にあれば夜は 150ms 超もあり得る。出口候補としては Linode Singapore (Akamai 経由 82ms) が AWS より 12ms 速く、時間帯でも崩れていない。DigitalOcean の公開ホストは名前解決できず未計測。
+
 自宅側 13〜14ms は v6プラスのアクセス網の固定費、東京〜シンガポールは物理距離で 65〜70ms が下限。トンネル経由 (87〜93ms) はほぼ天井で、残る改善余地は別事業者の SG リージョンを試す数 ms 程度。
 
 **重要な留保**: 所有者が直結で FACEIT SEA をプレイしたときの TAB ping は 77〜95ms。実際に当たっている FACEIT サーバーは OVH ではなく Leaseweb/GCP 相当の経路にいる可能性が高く、その場合トンネルは平均 ping を改善しない (むしろ数 ms 悪化)。トンネルの価値は「宛先によらず 88〜93ms に揃う」「PCCW 区間の揺れを避ける」安定性側にある。続ける価値の判断には、試合ごとのサーバー IP と TAB ping を直結/トンネルで比較する実データが要る (未収集)。
@@ -45,6 +60,8 @@
 - 対策は `dist/start-tunnel.ps1` (管理者権限)。トンネルを張ったまま `wg set <name> listen-port <p>` で候補ポートを切り替え、10.66.0.1 への ping 最小値を比べて最速ポートを conf に保存する。再起動後に再検証し、150ms 以上なら次点に切り替える。
 - MAP-E の外向きポート割当は接続ごとに少し変わるため、計測時 85ms のポートが再起動後 92ms になる程度のぶれはある。良い経路群の中でのぶれなので許容。
 - `wireguard.exe /installtunnelservice <任意パス>` だけだと WireGuard アプリの一覧に出ない。アプリは `C:\Program Files\WireGuard\Data\Configurations` の `.conf.dpapi` しか見ないので、start-tunnel.ps1 は平文 conf をそこに置き、WireGuardManager サービスを再起動して暗号化させ、`.conf.dpapi` からサービスを起動している。
+- アプリの保存先にある旧 `.conf.dpapi` は WireGuardManager を止めただけでは削除できず (UI プロセスが握っている)、旧 AllowedIPs のまま起動してしまう事故があった (2026-09-24 夜、PhoenixNAP の CIDR を足したのに載らなかった)。start-tunnel.ps1 は wireguard.exe を全部止めて takeown/icacls で消し、起動後に AllowedIPs の各 CIDR が Get-NetRoute に載っているか検証して警告する。
+- 夜間はサービス再起動のたびに外れ経路 (250ms) を引くことが続いた (6回連続) ため、最終起動後に RTT が悪ければ再起動せず `wg set listen-port` を回して良い経路に落ち着かせ、その時のポートを conf に書く。
 - 所有者の PC では所有者用の full conf がアプリに登録済み (2026-09-24 時点、ポート 42381)。full は全通信を通すので、ノードが 02:00 に停止すると WireGuard を無効化するまでネット全体が落ちる。普段は split を推奨。
 
 ## FACEIT サーバー IP について
@@ -52,6 +69,8 @@
 - FACEIT は SGP サーバーの IP を公開しておらず、監視サイトにも載らない (A2S に応答しない)。旧 Steam マスターサーバー (hl2master) は廃止済み。
 - FACEIT 内部 API (`api.faceit.com/match/v2/match/<id>`、ブラウザのログインセッションで叩ける) は終了済み試合にサーバー IP を含まない (location "Singapore" のみ)。IP は試合中にしか取れない。
 - コミュニティ報告の候補: OVH 139.99.112.177 / 51.79.176.5、SG.GS 103.14.247.211/.203、Leaseweb 23.106.253.161、GCP 35.240.144.156 / 35.187.231.7。これらの網を `split-allowed-ips.txt` に入れてある。
+- **訂正**: 131.153.46.204:27015 (PhoenixNAP Singapore, AS59210) は所有者が servers.upkk.com のサーバー一覧で見つけたシンガポールのコミュニティサーバーで、**FACEIT のサーバーではない**。FACEIT SGP の実 IP は 2026-09-24 時点でまだ未確認。以下はこのコミュニティサーバーに対する計測。A2S に challenge 応答あり。自宅からは KDDI → NTT 129.250.x → 116.51.16.243 → PhoenixNAP エッジ 103.243.172.31 で 81〜82 ms (夜でも安定、サーバー自体は ICMP 無応答)。EC2 → 同サーバー 1.3〜2.3 ms。つまり夜の AWS 経由は 94+2 ≒ 96 ms で直結より約 12 ms 遅く、この事業者に対してはトンネルの利点がない (ただし FACEIT がここを使っている証拠はない)。split-allowed-ips.txt には有効な CIDR として記載 (所有者の方針: リストには入れておき、直結のほうが良い日はトンネルを切るだけ)。このコミュニティサーバーでは直結のほうがゲーム内 ping が良かった (2026-09-24 夜、トンネル経由 79+2ms の見込みに対して)。OVH/Leaseweb 系のサーバーに当たった試合だけトンネルが効く構図。
+- servers.upkk.com (country=SG) のコミュニティサーバー 122 本は 11 ホストに集約され、Datacamp/CDN77 (149.102.250.x) が 111 本、他は OVH、PhoenixNAP、Vultr、GSL Networks、Hetzner。2026-09-24 にこれらの SG ブロックをすべて split-allowed-ips.txt に追加 (計 58 CIDR)。ただしこれは FACEIT のサーバーではなく「シンガポール所在のサーバー網の網羅」であり、FACEIT SGP の実 IP は依然未確認。
 - 実 IP の確認手段: 試合中に CS2 コンソールで `status` (`udp/ip` 行)。自動化するなら起動オプション `-condebug` で `game/csgo/console.log` を出し、接続行を監視する。所有者の現在の起動オプションに `-condebug` は入っていない。
 
 ## 環境の癖

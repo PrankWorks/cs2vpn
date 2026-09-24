@@ -50,15 +50,31 @@ function Set-ConfPort([int]$port) {
 function Install-FromStore {
   & $wgui /uninstalltunnelservice $name 2>$null | Out-Null; Start-Sleep 3
   if (-not (Test-Path $store)) { New-Item -ItemType Directory -Path $store -Force | Out-Null }
-  Remove-Item -Path (Join-Path $store "$name.conf"), (Join-Path $store "$name.conf.dpapi"), (Join-Path $store "*.tmp") -Force -ErrorAction SilentlyContinue
-  Copy-Item -Path $Conf -Destination (Join-Path $store "$name.conf") -Force
+  # Stop the manager first so the old encrypted copy is not held open / re-created from stale state.
   $mgr = Get-Service -Name WireGuardManager -ErrorAction SilentlyContinue
-  if ($mgr) { Restart-Service WireGuardManager -Force -ErrorAction SilentlyContinue } else { Start-Process $wgui | Out-Null }
+  if ($mgr) { Stop-Service WireGuardManager -Force -ErrorAction SilentlyContinue; Start-Sleep 2 }
+  Get-Process -Name wireguard -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep 1
   $enc = Join-Path $store "$name.conf.dpapi"
+  Remove-Item -Path (Join-Path $store "$name.conf"), $enc, (Join-Path $store "*.tmp") -Force -ErrorAction SilentlyContinue
+  if (Test-Path $enc) {
+    takeown /f $enc 2>$null | Out-Null
+    icacls $enc /grant "*S-1-5-32-544:F" 2>$null | Out-Null
+    Remove-Item -Path $enc -Force -ErrorAction SilentlyContinue
+  }
+  if (Test-Path $enc) { Write-Host "警告: 古い設定 $enc を削除できませんでした。" }
+  Copy-Item -Path $Conf -Destination (Join-Path $store "$name.conf") -Force
+  if ($mgr) { Start-Service WireGuardManager -ErrorAction SilentlyContinue } else { Start-Process $wgui | Out-Null }
   for ($t = 0; $t -lt 20 -and -not (Test-Path $enc); $t++) { Start-Sleep -Milliseconds 500 }
   $src = if (Test-Path $enc) { Remove-Item -Path (Join-Path $store "$name.conf") -Force -ErrorAction SilentlyContinue; $enc } else { Join-Path $store "$name.conf" }
   & $wgui /installtunnelservice $src | Out-Null
   Start-Sleep 4
+  # Verify the routes really reflect this .conf (catches a stale store copy).
+  $aip = (Get-Content $Conf | Where-Object { $_ -match '^\s*AllowedIPs\s*=' }) -replace '^\s*AllowedIPs\s*=\s*',''
+  $want = ($aip -split ',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -ne '0.0.0.0/0' }
+  $have = (Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceAlias -eq $name }).DestinationPrefix
+  $missing = $want | Where-Object { $have -notcontains $_ }
+  if ($missing) { Write-Host ("警告: 次の宛先がトンネルのルートに載っていません: {0}" -f ($missing -join ', ')) }
 }
 
 # Bring the tunnel up through the app store so it appears in the WireGuard GUI.
@@ -85,14 +101,21 @@ $ok = $results | Where-Object { $_.rtt -ge 0 } | Sort-Object rtt
 if (-not $ok) { Write-Host "どのポートでも応答がありません。ネットワークやファイアウォールを確認してください。"; Done 1 }
 $best = $ok[0]
 
-$final = -1
-foreach ($cand in ($ok | Select-Object -First 3)) {
-  $best = $cand
-  Set-ConfPort $best.port
-  Install-FromStore
-  $final = Get-Rtt
-  if ($final -ge 0 -and $final -lt $MaxMs) { break }
-  Write-Host ("  ポート {0} は再起動後 {1} ms だったので次の候補を試します" -f $best.port, $final)
+Set-ConfPort $best.port
+Install-FromStore
+$final = Get-Rtt
+if (-not ($final -ge 0 -and $final -lt $MaxMs)) {
+  # After a restart the flow can land on a slow path again. Keep the tunnel up and switch ports live
+  # until it is fast, then remember that port.
+  Write-Host ("  再起動後は {0} ms。トンネルを張ったままポートを切り替えて良い経路を探します..." -f $final)
+  $live = @($ok | Select-Object -Skip 1 | ForEach-Object { $_.port }) + (Get-Random -Count $Candidates -InputObject (40000..60000))
+  foreach ($port in $live) {
+    & $wg set $name listen-port $port 2>$null
+    Start-Sleep -Milliseconds 800
+    $final = Get-Rtt
+    Write-Host ("  ポート {0,5}: {1}" -f $port, $(if ($final -lt 0) { "応答なし" } else { "$final ms" }))
+    if ($final -ge 0 -and $final -lt $MaxMs) { $best = [pscustomobject]@{ port = $port; rtt = $final }; Set-ConfPort $port; break }
+  }
 }
 Write-Host ""
 Write-Host ("最速: ポート {0} ({1} ms)。この設定を保存し、トンネル '{2}' を再起動しました (確認 {3} ms)。" -f $best.port, $best.rtt, $name, $final)

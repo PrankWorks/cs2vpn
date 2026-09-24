@@ -1,0 +1,23 @@
+# NOTE: 131.153.46.204 is a Singapore community CS2 server (from servers.upkk.com), not a FACEIT server.
+== ping 131.153.46.204
+    Packets: Sent = 10, Received = 0, Lost = 10 (100% loss),
+== tracert 131.153.46.204
+  8     *        *       14 ms  129.250.5.200 
+  9    81 ms    82 ms    82 ms  129.250.2.242 
+ 10   114 ms   111 ms     *     129.250.6.71 
+ 11    82 ms    82 ms    81 ms  116.51.16.243 
+ 12    82 ms    81 ms    81 ms  103.243.172.31 
+ 13    81 ms    80 ms     *     103.243.172.11 
+
+Trace complete.
+== ping 131.153.46.1
+    Minimum = 103ms, Maximum = 129ms, Average = 118ms
+== tracert 131.153.46.1
+  8    14 ms     *        *     129.250.5.200 
+  9   130 ms   129 ms     *     129.250.2.242 
+ 10   157 ms   162 ms   162 ms  129.250.6.71 
+ 11   114 ms     *      131 ms  116.51.16.243 
+ 12   129 ms   129 ms   129 ms  103.243.172.31 
+ 13   129 ms     *      129 ms  131.153.46.1 
+
+Trace complete.
