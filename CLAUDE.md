@@ -23,7 +23,7 @@
 
 | 宛先 | RTT | 経路 |
 |---|---|---|
-| OVH SG エッジ 103.5.15.5 / LG 15.235.182.181 | 94〜135 ms | KDDI → Telstra 134.159.125.37 (118ms) → PCCW 202.84.x (190ms 超のホップ) → OVH |
+| OVH エッジ 103.5.15.5 (登録上は香港 OVH-VKS-HKG2) / SG LG 15.235.182.181 | 94〜135 ms | KDDI → Telstra 134.159.125.37 (118ms) → PCCW 202.84.x (190ms 超のホップ) → OVH |
 | Leaseweb SG 23.106.253.x | 81 ms | KDDI → Tata 216.6.52.5 (東京) → Tata SG |
 | SG.GS 103.14.247.x | 94 ms | Tata 経由 |
 | GCP asia-southeast1 35.240.144.156 | 86 ms | KDDI → Google 直接ピア |
@@ -76,6 +76,8 @@
 - **訂正**: 131.153.46.204:27015 (PhoenixNAP Singapore, AS59210) は所有者が servers.upkk.com のサーバー一覧で見つけたシンガポールのコミュニティサーバーで、**FACEIT のサーバーではない**。以下はこのコミュニティサーバーに対する計測。A2S に challenge 応答あり。自宅からは KDDI → NTT 129.250.x → 116.51.16.243 → PhoenixNAP エッジ 103.243.172.31 で 81〜82 ms (夜でも安定、サーバー自体は ICMP 無応答)。EC2 → 同サーバー 1.3〜2.3 ms。つまり夜の AWS 経由は 94+2 ≒ 96 ms で直結より約 12 ms 遅く、この事業者に対してはトンネルの利点がない (ただし FACEIT がここを使っている証拠はない)。split-allowed-ips.txt には有効な CIDR として記載 (所有者の方針: リストには入れておき、直結のほうが良い日はトンネルを切るだけ)。このコミュニティサーバーでは直結のほうがゲーム内 ping が良かった (2026-09-24 夜、トンネル経由 79+2ms の見込みに対して)。OVH/Leaseweb 系のサーバーに当たった試合だけトンネルが効く構図。
 - servers.upkk.com (country=SG) のコミュニティサーバー 122 本は 11 ホストに集約され、Datacamp/CDN77 (149.102.250.x) が 111 本、他は OVH、PhoenixNAP、Vultr、GSL Networks、Hetzner。2026-09-24 にこれらの SG ブロックをすべて split-allowed-ips.txt に追加 (計 58 CIDR)。ただしこれは FACEIT のサーバーではなく「シンガポール所在のサーバー網の網羅」であり、FACEIT SGP の実 IP は依然未確認。
 - **確定 (2026-09-24 夜、FACEIT の実試合)**: FACEIT SGP ゲームサーバー 79.127.213.54 = Datacamp/CDN77 Singapore (AS60068、ブロック 79.127.213.0/24)。サーバーは ICMP に応答する。自宅直結: KDDI → Datacamp 網 138.199.0.36 (東京、13ms) → 152.233.118.1 (79ms) → SG で 92 ms。EC2 → 同サーバー 1.5 ms。したがってトンネル経由は 80〜85 + 1.5 ≒ 82〜87 ms の見込みで、直結 92 ms より 5〜10 ms 改善。Datacamp のシンガポール割当は RIPE (netname CDN77-SGP / CDNEXT-SGP、21 レンジ) と ARIN (CDNEXT-SGP*、11 レンジ) に分かれており、合計 32 CIDR をすべて split-allowed-ips.txt に入れた (/24 だけでは不足)。Datacamp は servers.upkk.com の SG コミュニティサーバーの大半 (149.102.250.x) も抱えており、FACEIT SEA が Datacamp を使っている可能性が高い。
+- 2026-09-26: RIPE にはアンダースコア表記の netname (CDN77_SGP / CDN77_SGP-EQ3 / CDN77_SGP_EQ3) もあり、ハイフン表記の検索では漏れていた 84.17.38.0/23、89.187.162.0-239 + 89.187.163.0/24、143.244.33.0/24、169.150.243.0/24 を追加 (RIPE 上の Datacamp SGP 登録 26 件はこれで全部載った)。89.187.162.240/28 は BUNNYCDN_SGP (Datacamp 上の CDN 顧客) なので除外。Datacamp の別 AS (AS212238) の SG 範囲は顧客のリース IP (VPN 業者など) なので入れていない。
+- **リストの追加方針 (所有者、2026-09-26)**: 「確実にシンガポール」かつ「FACEIT が使っている確証がある」網だけ追加する。現時点で確証があるのは Datacamp/CDN77 だけ。Vultr SG (公式 geofeed で 16 プレフィクス)、Leaseweb SG (LSW-SG* 14 ブロック)、SG.GS の残りは SG であることは確認済みだが FACEIT の確証がないので保留。誤ったエントリーは消す: 2026-09-26 に 103.5.12.0/22 (登録は OVH 香港 OVH-VKS-HKG1/2) を削除、139.99.0.0/16 を 139.99.0.0/17 に縮小 (139.99.128.0/17 は OVH Australia)。
 - 実 IP の確認手段: 試合中に CS2 コンソールで `status` (`udp/ip` 行)。自動化するなら起動オプション `-condebug` で `game/csgo/console.log` を出し、接続行を監視する。所有者の現在の起動オプションに `-condebug` は入っていない。
 
 ## 環境の癖

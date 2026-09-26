@@ -1,12 +1,13 @@
 # Destinations routed through the Singapore exit node (split tunnel).
 # One CIDR per line, '#' comments allowed. Regenerate client configs with scripts/fill-split.sh after editing.
 # Verify the real FACEIT server IP with `status` in the CS2 console during a match and add its /24 here.
-139.99.0.0/16        # OVH Singapore/APAC  (FACEIT SGP, e.g. 139.99.112.177)
-103.5.12.0/22        # OVH Singapore edge
-51.79.128.0/17       # OVH APAC (FACEIT SGP, e.g. 51.79.176.5)
-15.235.128.0/17      # OVH APAC
-103.14.246.0/23      # SG.GS               (FACEIT SGP, e.g. 103.14.247.211) - whole block
-23.106.252.0/22      # Leaseweb Singapore  (FACEIT SGP, e.g. 23.106.253.161) - whole block
+# OVH/SG.GS/Leaseweb "FACEIT SGP" examples below are community reports, not confirmed.
+# Removed 2026-09-26: 103.5.12.0/22 (registered as OVH Hong Kong, OVH-VKS-HKG1/2) and 139.99.128.0/17 (OVH Australia).
+139.99.0.0/17        # OVH Singapore       (reported FACEIT SGP, e.g. 139.99.112.177)
+51.79.128.0/17       # OVH Singapore       (reported FACEIT SGP, e.g. 51.79.176.5)
+15.235.128.0/17      # OVH Singapore (OVHCLOUD-SGP)
+103.14.246.0/23      # SG.GS               (reported FACEIT SGP, e.g. 103.14.247.211) - whole block
+23.106.252.0/22      # Leaseweb Singapore  (reported FACEIT SGP, e.g. 23.106.253.161) - whole block
 103.254.152.0/22     # Leaseweb Singapore  - whole block
 # Google Cloud asia-southeast1: all published IPv4 prefixes (https://www.gstatic.com/ipranges/cloud.json, 2026-09-24)
 34.1.128.0/20        # Google Cloud asia-southeast1
@@ -65,7 +66,7 @@
 131.153.47.0/24      # PhoenixNAP SG (second /24 seen)
 5.223.0.0/16         # Hetzner Cloud Singapore (CLOUD-SIN; 5.223.x is the Singapore location)
 
-# --- Datacamp / CDN77 Singapore: ALL registered SGP blocks (RIPE netname CDN77-SGP / CDNEXT-SGP + ARIN CDNEXT-SGP*) ---
+# --- Datacamp / CDN77 Singapore: ALL registered SGP blocks (RIPE netname CDN77-SGP / CDNEXT-SGP / CDN77_SGP* + ARIN CDNEXT-SGP*) ---
 # CONFIRMED FACEIT SGP game server 79.127.213.54 lives here (live match, 2026-09-24). Also 111 of 122 SG community servers (149.102.250.x).
 46.151.192.0/24      # Datacamp SG
 79.127.170.0/24      # Datacamp SG
@@ -88,6 +89,15 @@
 152.233.86.0/24      # Datacamp SG
 156.146.56.0/23      # Datacamp SG
 217.79.105.0/24      # Datacamp SG
+84.17.38.0/23        # Datacamp SG (RIPE CDN77_SGP_EQ3, added 2026-09-26)
+# 89.187.162.0-239 + 89.187.163.0/24 are CDN77_SGP-EQ3; 89.187.162.240/28 is BUNNYCDN_SGP (a CDN customer) and is left out.
+89.187.162.0/25      # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+89.187.162.128/26    # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+89.187.162.192/27    # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+89.187.162.224/28    # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+89.187.163.0/24      # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+143.244.33.0/24      # Datacamp SG (RIPE CDN77_SGP-EQ3, added 2026-09-26)
+169.150.243.0/24     # Datacamp SG (RIPE CDN77_SGP, added 2026-09-26)
 149.102.231.0/24     # Datacamp SG
 149.102.250.0/24     # Datacamp SG
 149.102.255.0/24     # Datacamp SG
