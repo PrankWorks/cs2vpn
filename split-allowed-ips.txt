@@ -1,14 +1,38 @@
 # Destinations routed through the Singapore exit node (split tunnel).
-# One CIDR per line, '#' comments allowed. Regenerate client configs with scripts/fill-split.sh after editing.
-# Verify the real FACEIT server IP with `status` in the CS2 console during a match and add its /24 here.
+# One CIDR per line, '#' comments allowed. Push to master: start-tunnel.ps1 pulls this file on every run
+# (scripts/fill-split.sh fills offline configs). Verify a FACEIT server IP with `status` in the CS2 console.
+# Policy: only networks whose Singapore location is confirmed by the registry (country SG) or the provider's
+# own geofeed. General-purpose clouds/CDNs, VPN providers and leased/customer IP blocks are left out.
 # OVH/SG.GS/Leaseweb "FACEIT SGP" examples below are community reports, not confirmed.
 # Removed 2026-09-26: 103.5.12.0/22 (registered as OVH Hong Kong, OVH-VKS-HKG1/2) and 139.99.128.0/17 (OVH Australia).
 139.99.0.0/17        # OVH Singapore       (reported FACEIT SGP, e.g. 139.99.112.177)
 51.79.128.0/17       # OVH Singapore       (reported FACEIT SGP, e.g. 51.79.176.5)
 15.235.128.0/17      # OVH Singapore (OVHCLOUD-SGP)
-103.14.246.0/23      # SG.GS               (reported FACEIT SGP, e.g. 103.14.247.211) - whole block
-23.106.252.0/22      # Leaseweb Singapore  (reported FACEIT SGP, e.g. 23.106.253.161) - whole block
-103.254.152.0/22     # Leaseweb Singapore  - whole block
+# --- SG.GS (AS24482) and its Singapore hosting brands: registry country SG (SGGS*, HOSTSG*, ONEASIAHOST) ---
+103.14.244.0/22      # SG.GS               (reported FACEIT SGP, e.g. 103.14.247.211)
+49.213.16.0/22       # SG.GS (SGGS-SG)
+49.213.20.0/23       # SG.GS (SGGS-SG)
+116.251.208.0/22     # SG.GS (SGGS-AS-AP)
+116.251.214.0/23     # SG.GS (SGGS-AS-AP; 116.251.212.0/23 is SGGS-MY = Malaysia, left out)
+116.251.216.0/21     # OneAsiaHost (ONEASIAHOST)
+203.175.168.0/22     # HostSG (HOSTSG-VPS)
+203.175.174.0/23     # HostSG / SG.GS (HOSTSG-CLOUD, SGGS)
+# --- Leaseweb Singapore (AS59253): Leaseweb's own blocks, registry netname LSW-SG* / LSW-SIN* / LSW-AS-AP, country SG ---
+23.106.248.0/21      # Leaseweb Singapore  (reported FACEIT SGP, e.g. 23.106.253.161)
+103.254.152.0/22     # Leaseweb Singapore
+23.106.48.0/21       # Leaseweb Singapore
+23.106.64.0/20       # Leaseweb Singapore
+23.106.120.0/21      # Leaseweb Singapore
+23.108.96.0/21       # Leaseweb Singapore
+23.111.12.0/22       # Leaseweb Singapore
+43.249.38.0/23       # Leaseweb Singapore
+64.120.92.0/22       # Leaseweb Singapore
+64.120.110.0/23      # Leaseweb Singapore
+142.91.96.0/21       # Leaseweb Singapore
+172.255.208.0/22     # Leaseweb Singapore
+173.234.0.0/20       # Leaseweb Singapore
+209.58.160.0/20      # Leaseweb Singapore
+209.58.176.0/21      # Leaseweb Singapore
 # Google Cloud asia-southeast1: all published IPv4 prefixes (https://www.gstatic.com/ipranges/cloud.json, 2026-09-24)
 34.1.128.0/20        # Google Cloud asia-southeast1
 34.1.192.0/20        # Google Cloud asia-southeast1
@@ -61,10 +85,47 @@
 131.153.46.0/24      # PhoenixNAP SG (community server 131.153.46.204)
 # --- Singapore hosts seen on servers.upkk.com (country=SG, 2026-09-24: 122 community servers, 11 hosts) ---
 66.42.48.0/20        # Vultr Singapore (SGP_VULTR_CUST)
-203.27.106.0/24      # GSL Networks Singapore
-103.107.199.0/24     # GSL Networks Singapore
+203.27.106.0/23      # GSL Networks Singapore (GSLNETWORKS)
+103.107.198.0/23     # GSL Networks Singapore (GSLNETWORKS)
+103.62.48.0/24       # Streamline Servers Singapore (game server host, announced by GSL)
 131.153.47.0/24      # PhoenixNAP SG (second /24 seen)
 5.223.0.0/16         # Hetzner Cloud Singapore (CLOUD-SIN; 5.223.x is the Singapore location)
+# --- Vultr Singapore (AS20473): every SG prefix in Vultr's own geofeed (https://geofeed.constant.com/, 2026-09-26) ---
+45.32.96.0/19        # Vultr Singapore
+45.76.144.0/20       # Vultr Singapore
+45.76.160.0/22       # Vultr Singapore
+45.76.176.0/20       # Vultr Singapore
+45.77.32.0/20        # Vultr Singapore
+45.77.168.0/21       # Vultr Singapore
+45.77.240.0/20       # Vultr Singapore
+64.176.80.0/20       # Vultr Singapore
+139.180.128.0/19     # Vultr Singapore
+139.180.184.0/21     # Vultr Singapore
+139.180.208.0/20     # Vultr Singapore
+149.28.128.0/19      # Vultr Singapore
+207.148.64.0/20      # Vultr Singapore
+207.148.116.0/22     # Vultr Singapore
+207.148.120.0/21     # Vultr Singapore
+# --- i3D.net Singapore (AS49544, game server host): sub-allocations are i3Dnet-sgsin1-*, country SG ---
+213.179.200.0/22     # i3D.net Singapore (sgsin1)
+# --- Gcore Singapore (AS199524, game/cloud host): registry country SG; anycast/DNS and non-SG blocks left out ---
+5.8.26.0/24          # Gcore Singapore (GCL-CUSTOMER-SG)
+5.45.187.0/24        # Gcore Singapore (GCL-CUSTOMER-SG)
+45.135.228.0/24      # Gcore Singapore (GCL-CUSTOMER-SG)
+81.28.13.0/24        # Gcore Singapore (GCL-CUSTOMER-SG)
+85.90.206.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+89.44.192.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+91.199.87.0/24       # Gcore Singapore (country SG)
+91.243.81.0/24       # Gcore Singapore (country SG)
+92.38.141.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.38.183.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.223.16.0/23       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.223.29.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.223.85.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.223.86.0/24       # Gcore Singapore (GCL-CUSTOMER-SG)
+92.223.116.0/23      # Gcore Singapore (GCL-CUSTOMER-SG)
+95.85.74.0/24        # Gcore Singapore (GCL-CUSTOMER-SG)
+185.249.132.0/24     # Gcore Singapore (GCL-CUSTOMER-SG)
 
 # --- Datacamp / CDN77 Singapore: ALL registered SGP blocks (RIPE netname CDN77-SGP / CDNEXT-SGP / CDN77_SGP* + ARIN CDNEXT-SGP*) ---
 # CONFIRMED FACEIT SGP game server 79.127.213.54 lives here (live match, 2026-09-24). Also 111 of 122 SG community servers (149.102.250.x).
