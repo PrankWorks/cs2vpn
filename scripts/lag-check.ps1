@@ -53,7 +53,9 @@ function Measure-Window {
 
 function Get-Verdict($r) {
   if ($r.Contains('LAN') -and $r.LAN.bad) { return "LAN: 自宅の LAN / PC 側で遅延かロス (ルーターまでで既に悪い)" }
-  if ($r.JP.bad) { return "JP: 国内区間 (回線 / プロバイダ側) が悪い" }
+  # Everything beyond the router crosses the domestic segment, so a real domestic problem also shows on AWS/TUNNEL.
+  # 1.1.1.1 alone dropping echoes is Cloudflare rate-limiting ICMP (seen 2026-10-06: 75% loss while AWS/TUNNEL had 0%).
+  if ($r.JP.bad -and ($r.AWS.bad -or $r.TUNNEL.bad) -and -not ($r.AWS.loss -ge 100 -and $r.TUNNEL.loss -ge 100)) { return "JP: 国内区間 (回線 / プロバイダ側) が悪い" }
   if ($r.AWS.loss -ge 100 -and $r.TUNNEL.loss -ge 100) { return "NODE: 出口ノードが応答しない (停止中? 稼働は 19:00〜02:00 JST)" }
   if ($r.TUNNEL.loss -ge 100) { return "DOWN: トンネルの中に届かない (トンネルが無効か切れている。start-tunnel.bat で張り直す)" }
   if ($r.TUNNEL.bad -and $r.AWS.bad) { return "PATH: KDDI -> AWS の経路全体が悪い (ポートを変えても直らない可能性が高い)" }
