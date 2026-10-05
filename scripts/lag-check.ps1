@@ -54,6 +54,8 @@ function Measure-Window {
 function Get-Verdict($r) {
   if ($r.Contains('LAN') -and $r.LAN.bad) { return "LAN: 自宅の LAN / PC 側で遅延かロス (ルーターまでで既に悪い)" }
   if ($r.JP.bad) { return "JP: 国内区間 (回線 / プロバイダ側) が悪い" }
+  if ($r.AWS.loss -ge 100 -and $r.TUNNEL.loss -ge 100) { return "NODE: 出口ノードが応答しない (停止中? 稼働は 19:00〜02:00 JST)" }
+  if ($r.TUNNEL.loss -ge 100) { return "DOWN: トンネルの中に届かない (トンネルが無効か切れている。start-tunnel.bat で張り直す)" }
   if ($r.TUNNEL.bad -and $r.AWS.bad) { return "PATH: KDDI -> AWS の経路全体が悪い (ポートを変えても直らない可能性が高い)" }
   if ($r.TUNNEL.bad) { return "FLOW: トンネルが乗っている経路だけ悪い (dist\reroll.bat でポートを変えれば直る見込み)" }
   return "OK: 回線とトンネルは正常 (ラグがあるならゲームサーバー側か PC 側)"

@@ -48,6 +48,12 @@ function Show($r, $label) {
   $txt = if ($r.min -lt 0) { "応答なし" } else { "最小 {0} ms / 90% {1} ms / ロス {2}" -f $r.min, $r.p90, $r.lost }
   Write-Host ("  {0,-6} ポート {1,5}: {2}" -f $label, $r.port, $txt)
 }
+function Set-LivePort([int]$port) {
+  # Apply the port and read it back; a failed `wg set` must not be mistaken for a measured path.
+  & $wg set $name listen-port $port 2>$null
+  $now = [int]((& $wg show $name listen-port 2>$null) | Select-Object -First 1)
+  return ($now -eq $port)
+}
 function Set-ConfPort([int]$port) {
   $txt = Get-Content $Conf | Where-Object { $_ -notmatch '^\s*ListenPort' }
   $txt = $txt -replace '^\[Interface\]', "[Interface]`nListenPort = $port"
@@ -70,7 +76,7 @@ Write-Host "経路が悪いので、トンネルを張ったまま別のポー�
 $best = $cur
 $results = @($cur)
 foreach ($port in (Get-Random -Count $Candidates -InputObject (40000..60000) | Where-Object { $_ -ne $curPort })) {
-  & $wg set $name listen-port $port 2>$null
+  if (-not (Set-LivePort $port)) { Write-Host ("  候補   ポート {0,5}: 切り替えに失敗したので飛ばします" -f $port); continue }
   Start-Sleep -Milliseconds 300
   $r = Probe $port
   Show $r "候補"
@@ -80,7 +86,12 @@ foreach ($port in (Get-Random -Count $Candidates -InputObject (40000..60000) | W
   if ($best.port -ne $curPort -and $best.lost -eq 0 -and $best.p90 -le $floor + $GoodMarginMs) { break }
 }
 
-& $wg set $name listen-port $best.port 2>$null
+if (-not (Set-LivePort $best.port)) {
+  $live = (& $wg show $name listen-port 2>$null) | Select-Object -First 1
+  Write-Host ""
+  Write-Host ("ポート {0} への切り替えを確認できませんでした (今のポート: {1})。start-tunnel.bat で張り直してください。" -f $best.port, $live)
+  Done 1
+}
 Start-Sleep -Milliseconds 300
 $check = Probe $best.port
 Write-Host ""
@@ -91,5 +102,5 @@ if ($best.port -eq $curPort) {
 }
 Set-ConfPort $best.port
 Write-Host ("ポート {0} -> {1} に切り替えました (90% {2} -> {3} ms、確認 {4} ms / ロス {5})。" -f $curPort, $best.port, $cur.p90, $best.p90, $check.p90, $check.lost)
-Write-Host "トンネルは張ったままなので、ゲームの接続はそのまま続きます。"
+Write-Host "トンネルは張ったままです (切り替えの瞬間に数パケット落ちることはありますが、試合の接続は続く想定です)。"
 Done 0
