@@ -165,9 +165,15 @@ function Check-Outage([long]$now) {
   $script:outage = $state
 }
 
+$SegmentColor = @{ LOCAL = 'Red'; DOMESTIC = 'Cyan'; PATH = 'Magenta'; FLOW = 'Yellow'; SERVER = 'DarkYellow'; UNCLEAR = 'Gray'
+  NODE = 'Red'; DOWN = 'Red'; RECOVERED = 'Green'; START = 'Cyan'; STOP = 'Cyan' }
 function Write-Out([string]$type, [string]$seg, [int]$durMs, [string]$targetsTxt, [string]$detail, [long]$t, [string]$console, [switch]$NoConsole) {
   $when = $script:t0.AddMilliseconds($t)
-  if (-not $NoConsole) { Write-Host ("{0:HH:mm:ss.fff}  {1}" -f $when, $console) }
+  if (-not $NoConsole) {
+    $color = if ($type -eq 'minute') { 'DarkGray' } elseif ($SegmentColor.ContainsKey($seg)) { $SegmentColor[$seg] } else { 'Gray' }
+    Write-Host ("  {0:HH:mm:ss.fff}  " -f $when) -NoNewline -ForegroundColor DarkGray
+    Write-Host $console -ForegroundColor $color
+  }
   if ($script:logPath) { Add-Content -Path $script:logPath -Encoding UTF8 -Value ('{0:yyyy-MM-ddTHH:mm:ss.fff},{1},{2},{3},{4},"{5}"' -f $when, $type, $seg, $durMs, $targetsTxt, ($detail -replace '"', "'")) }
 }
 

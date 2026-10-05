@@ -70,5 +70,7 @@ function Format-Row($r) {
 "$WindowSec 秒測ります..."
 $r = Measure-Window
 Format-Row $r
-"判定: " + (Get-Verdict $r)
-if ((Get-Verdict $r) -like 'OK*') { "(1 ラウンドに数回だけ跳ねるラグは 10 秒では捕まりにくいので、プレイ中は scripts\lag-watch.ps1 を流しておく)" }
+$v = Get-Verdict $r
+$vc = @{ OK = 'Green'; FLOW = 'Yellow'; PATH = 'Magenta'; JP = 'Cyan'; LAN = 'Red'; NODE = 'Red'; DOWN = 'Red' }[($v -split ':')[0]]
+Write-Host ("判定: " + $v) -ForegroundColor $(if ($vc) { $vc } else { 'White' })
+if ($v -like 'OK*') { "(1 ラウンドに数回だけ跳ねるラグは 10 秒では捕まりにくいので、プレイ中は scripts\lag-watch.ps1 を流しておく)" }

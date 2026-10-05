@@ -23,7 +23,7 @@ aws cloudformation delete-stack --region ap-southeast-1 --stack-name csvpn-sg
 | パス | 役割 |
 |---|---|
 | `cfn/wg-exit.yaml` | CloudFormation。VPC、EC2 (WireGuard)、EIP、19:00〜02:00 JST の起動停止スケジュール |
-| `dist/start-tunnel.{bat,ps1}` | クライアント起動スクリプト。最速経路のポートを選んで保存する |
+| `dist/start-tunnel.{bat,ps1}` | クライアント起動スクリプト。登録後に経路の揺れ・ロスを測り、良好ならそのまま、悪ければ良い経路のポートに替えて保存する。自分と reroll を GitHub から自動更新 |
 | `dist/reroll.{bat,ps1}` | 「今ラグい」用。トンネルを張ったまま送信元ポートだけ変えて別経路へ移る (試合は切れない)。今の経路が正常なら何もしない |
 | `scripts/lag-check.ps1` | 今起きているラグの区間を 10 秒で切り分ける (LAN / 国内 / KDDI→AWS 全体 / トンネルの経路だけ)。管理者不要 |
 | `scripts/lag-watch.ps1` | プレイ中に流しておき、短い跳ね (1 ラウンドに数回) を区間付きで記録する。`-Server <ip>` で FACEIT サーバーも測る。管理者不要 |
