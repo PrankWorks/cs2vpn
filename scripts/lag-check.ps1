@@ -4,18 +4,16 @@
 #   JP     : 1.1.1.1 (Cloudflare Tokyo)          -> home line / domestic problem
 #   AWS    : the exit node's public IP (EIP)     -> KDDI -> AWS path as a whole (a different flow than the tunnel)
 #   TUNNEL : 10.66.0.1 through WireGuard         -> exactly the path the game packets take
-# Usage:
-#   powershell -File scripts/lag-check.ps1            # 10 s snapshot with a verdict
-#   powershell -File scripts/lag-check.ps1 -Watch     # keep running; log every window, print when it degrades
+# Usage: powershell -File scripts/lag-check.ps1   (10 s snapshot with a verdict)
+# This catches lag that is going on right now. Short hitches a few times per round need scripts/lag-watch.ps1,
+# which keeps running during play and logs each hitch with the segment it happened in.
 param(
-  [switch]$Watch,
   [int]$WindowSec = 10,
   [int]$IntervalMs = 100,
   [int]$JitterMs = 15,      # p90 - min above this counts as jittery
   [double]$LossPct = 3,     # loss above this counts as lossy
   [string]$Gateway = "10.66.0.1",
-  [string]$Endpoint,
-  [string]$Log = (Join-Path $env:LOCALAPPDATA "csvpn\lag-check.csv")
+  [string]$Endpoint
 )
 $ErrorActionPreference = 'Stop'
 
@@ -69,24 +67,8 @@ function Format-Row($r) {
 
 "計測点: " + (($points.Keys | ForEach-Object { "$_=$($points[$_])" }) -join '  ')
 "表示は 最小/中央/90% 値。'!' はしきい値超え (揺れ > $JitterMs ms またはロス > $LossPct %)"
-if (-not $Watch) {
-  "$WindowSec 秒測ります..."
-  $r = Measure-Window
-  Format-Row $r
-  "判定: " + (Get-Verdict $r)
-  exit 0
-}
-
-$dir = Split-Path $Log; if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-if (-not (Test-Path $Log)) { "time,verdict," + (($points.Keys | ForEach-Object { "$_`_min,$_`_p50,$_`_p90,$_`_loss" }) -join ',') | Set-Content -Path $Log -Encoding UTF8 }
-"監視中 ($WindowSec 秒ごとに判定、Ctrl+C で終了)。記録: $Log"
-$prev = 'OK'
-while ($true) {
-  $r = Measure-Window
-  $v = Get-Verdict $r
-  $tag = ($v -split ':')[0]
-  $line = (Get-Date -Format 's') + ",$tag," + (($r.Keys | ForEach-Object { $s = $r[$_]; "$($s.min),$($s.p50),$($s.p90),$($s.loss)" }) -join ',')
-  Add-Content -Path $Log -Value $line -Encoding UTF8
-  if ($tag -ne 'OK' -or $prev -ne 'OK') { "{0}  {1}`n    {2}" -f (Get-Date -Format 'HH:mm:ss'), $v, (Format-Row $r) }
-  $prev = $tag
-}
+"$WindowSec 秒測ります..."
+$r = Measure-Window
+Format-Row $r
+"判定: " + (Get-Verdict $r)
+if ((Get-Verdict $r) -like 'OK*') { "(1 ラウンドに数回だけ跳ねるラグは 10 秒では捕まりにくいので、プレイ中は scripts\lag-watch.ps1 を流しておく)" }
