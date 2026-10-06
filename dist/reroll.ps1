@@ -27,6 +27,7 @@ param(
   [switch]$Watch,
   [int]$WatchMinutes = 0,   # 0 = until the window is closed
   [switch]$InjectFlow,      # testing aid for -Watch: fake tunnel-only hitches at 20/30/40 s to exercise a switch
+  [int[]]$PreferPorts = @(), # -Watch: ports that measured good at startup, tried first (in order) when switching
   [int]$SpikeMs = 20,
   [int]$MergeMs = 150,
   [int]$RateCount = 3,
@@ -114,6 +115,7 @@ function Initialize-Monitor([long]$now = 0) {
     blips = 0; switches = 0; state = 'OK'; downSwitchAt = -1L; downWarned = $false
     lastRateSwitch = -1L; ineffective = 0; pauseUntil = -1L; sustainedTimes = New-Object System.Collections.Generic.List[long]
     guardUntil = -1L; guardTries = 0; globalMin = -1; lastSwitchAt = -1L; lastPathNote = -100000L; graceUntil = -1L; recentPorts = New-Object System.Collections.Generic.List[int]
+    prefer = New-Object System.Collections.Generic.List[int]
     port = 0; t0 = (Get-Date) }
 }
 function Process-MSample($tg, [long]$t, [int]$rtt) {
@@ -159,11 +161,20 @@ function Write-MLine([string]$kind, [string]$text, [string]$color, [long]$now) {
 function Get-DisplayWidth([string]$s) { $w = 0; foreach ($ch in $s.ToCharArray()) { if ([int]$ch -ge 0x1100) { $w += 2 } else { $w++ } }; $w }
 function Clear-Status { if ($script:statusLen -gt 0) { Write-Host ("`r" + (' ' * $script:statusLen) + "`r") -NoNewline; $script:statusLen = 0 } }
 function Invoke-Switch([string]$reason, [long]$now) {
-  # Pick a port not used recently, apply it live, judge it fresh (new baseline) after a 2 s guard window.
+  # Next port that measured good at startup (if any), else a random one not used recently. Applied live and
+  # judged fresh (new baseline) after a 2 s guard window.
   $m = $script:mon
   $old = $m.port
-  $port = Get-Random -InputObject (40000..60000)
-  for ($k = 0; $k -lt 20 -and ($m.recentPorts -contains $port -or $port -eq $old); $k++) { $port = Get-Random -InputObject (40000..60000) }
+  $port = 0
+  while ($m.prefer.Count -gt 0 -and -not $port) {
+    $c = $m.prefer[0]; $m.prefer.RemoveAt(0)
+    if ($c -ne $old -and $m.recentPorts -notcontains $c) { $port = $c }
+  }
+  $src = if ($port) { '良好だった候補' } else { 'ランダム' }
+  if (-not $port) {
+    $port = Get-Random -InputObject (40000..60000)
+    for ($k = 0; $k -lt 20 -and ($m.recentPorts -contains $port -or $port -eq $old); $k++) { $port = Get-Random -InputObject (40000..60000) }
+  }
   if (-not (Set-LivePort $port)) { Write-MLine 'error' ("ポート {0} への切り替えに失敗 (理由: {1})" -f $port, $reason) 'Red' $now; return $false }
   Set-ConfPort $port
   $m.recentPorts.Add($old); while ($m.recentPorts.Count -gt 10) { $m.recentPorts.RemoveAt(0) }
@@ -171,7 +182,7 @@ function Invoke-Switch([string]$reason, [long]$now) {
   $tun = $m.tunnel; Reset-Baseline $tun; $tun.cur = $null; $tun.recent.Clear()
   $m.tunEvents.Clear(); $m.flowTimes.Clear()
   $m.guardUntil = $now + 2000
-  Write-MLine 'switch' ("切替  ポート {0} -> {1}  ({2})" -f $old, $port, $reason) 'Cyan' $now
+  Write-MLine 'switch' ("切替  ポート {0} -> {1} [{2}]  ({3})" -f $old, $port, $src, $reason) 'Cyan' $now
   return $true
 }
 function Step-Monitor([long]$now) {
@@ -285,10 +296,12 @@ function Start-Watch {
   $m = $script:mon
   if ($ep) { $m.aws = New-MTarget 'AWS' $ep.Trim() }
   $m.port = Get-LivePort
+  foreach ($p in $PreferPorts) { if ($p -and $p -ne $m.port) { $m.prefer.Add($p) } }
   Write-Host ""
   Write-Host "  経路の監視を続けます (このウィンドウを閉じても、トンネルはそのまま使えます)" -ForegroundColor White
   Info ("トンネル内 10.66.0.1 と出口ノード {0} を 1 秒 20 回ずつ測定。記録: {1}" -f $(if ($m.aws) { $m.aws.ip } else { '(なし)' }), $Log)
-  Info ("トンネルだけが 5 秒続けて悪い、または {0} 秒で {1} 回跳ねたら、試合を切らずに別の経路へ切り替えます" -f $RateWindowSec, $RateCount)
+  Info ("トンネルだけが数秒続けて悪い、または {0} 秒で {1} 回跳ねたら、試合を切らずに別の経路へ切り替えます" -f $RateWindowSec, $RateCount)
+  if ($m.prefer.Count) { Info ("切り替え先は、起動時に良好だったポート {0} 個から順に使います" -f $m.prefer.Count) }
   Write-MLine 'state' ("監視開始  ポート {0}" -f $m.port) 'Cyan' 0
   $sw = [Diagnostics.Stopwatch]::StartNew(); $tick = 0L
   $stopAt = if ($WatchMinutes -gt 0) { $WatchMinutes * 60000L } else { [long]::MaxValue }

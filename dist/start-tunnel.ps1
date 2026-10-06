@@ -2,10 +2,10 @@
 # Run via start-tunnel.bat (double-click) or: powershell -File dist/start-tunnel.ps1 -Conf clients/owner-split.conf
 # Background: home ISP <-> AWS traffic is spread over several links by a per-flow hash, so the client's
 # source port decides which path (86 ms ... 250 ms, calm or jittery) the tunnel gets. After registering the
-# tunnel this script checks the path the same way reroll.ps1 does (30 pings through the tunnel: loss, 90th
-# percentile, spread). A good path is kept as is (no restart). Otherwise it switches the listen port live with
-# `wg set` until a good path shows up, then saves that port. The tunnel is registered through the WireGuard
-# app's own config store, so it shows up in the GUI and can be toggled there afterwards.
+# tunnel this script compares the current port with 12 random ones by switching the listen port live with
+# `wg set` and pinging through the tunnel (loss, 90th percentile, spread), keeps the best stable one (confirmed
+# with a longer probe) and saves it - without re-registering, so the measured path is the one that stays.
+# The tunnel is registered through the WireGuard app's own config store, so it shows up in the GUI.
 # Then the window stays open and keeps watching the path (reroll.ps1 -Watch): when the tunnel's own link turns
 # bad or keeps hitching, it moves to another port without dropping the game. Closing the window only stops the
 # watching; the tunnel stays up. -NoWatch ends after the setup instead.
@@ -14,15 +14,14 @@ param(
   [string]$Conf,
   [switch]$NoPause,
   [switch]$NoUpdate,
-  [switch]$Force,           # scan other ports even when the current path looks fine
-  [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad to exercise the switch / save / re-register branch
+  [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad so another port must win
   [switch]$NoWatch,         # end after setting up instead of staying to monitor the path
   [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
   [switch]$InjectFlow,      # testing aid: passed to reroll.ps1 -Watch (fake tunnel hitches to exercise a switch)
-  [int]$Candidates = 8,
+  [int]$Candidates = 12,    # ports compared besides the current one (13 in total)
+  [int]$SwitchMarginMs = 2, # leave a good current port only for a candidate at least this much better
   [int]$MaxMs = 150,
   [int]$JitterMs = 15,
-  [int]$GoodMarginMs = 5,
   [string]$ListUrl = "https://raw.githubusercontent.com/PrankWorks/cs2vpn/master/split-allowed-ips.txt"
 )
 $ErrorActionPreference = 'Continue'
@@ -175,14 +174,13 @@ function Wait-Tunnel([int]$sec = 12) {
   }
   return $false
 }
-function Probe([int]$port) {
-  # 30 echoes 50 ms apart through the tunnel (same UDP flow as the game). Score = p90, plus 20 ms per lost echo.
-  $n = 30
+function Probe([int]$port, [int]$n = 30, [int]$intervalMs = 50) {
+  # $n echoes $intervalMs apart through the tunnel (same UDP flow as the game). Score = p90, plus 20 ms per lost echo.
   $tasks = New-Object 'System.Threading.Tasks.Task[System.Net.NetworkInformation.PingReply][]' $n
   $sw = [Diagnostics.Stopwatch]::StartNew()
   for ($i = 0; $i -lt $n; $i++) {
     $tasks[$i] = (New-Object System.Net.NetworkInformation.Ping).SendPingAsync($gw, 1000)
-    while ($sw.ElapsedMilliseconds -lt ($i + 1) * 50) { Start-Sleep -Milliseconds 2 }
+    while ($sw.ElapsedMilliseconds -lt ($i + 1) * $intervalMs) { Start-Sleep -Milliseconds 2 }
   }
   try { [void][System.Threading.Tasks.Task]::WaitAll($tasks, 2000) } catch { }
   $ok = @(foreach ($t in $tasks) { if ($t.IsCompleted -and -not $t.IsFaulted -and $t.Result.Status -eq 'Success') { [int]$t.Result.RoundtripTime } }) | Sort-Object
@@ -210,25 +208,6 @@ function Set-LivePort([int]$port) {
   return ($now -eq $port)
 }
 function Get-LivePort { [int]((& $wg show $name listen-port 2>$null) | Select-Object -First 1) }
-function Find-GoodPort($skip, [int]$count, [ref]$tried, $first = @()) {
-  # Try ports live (no restart) and stop at the first good one: the $first ports in order, then random ones.
-  # Returns the best result seen (may be bad); the port left live may differ from it.
-  $best = $null
-  $ports = @($first | Where-Object { $skip -notcontains $_ }) + @(Get-Random -Count $count -InputObject (40000..60000) | Where-Object { $skip -notcontains $_ -and $first -notcontains $_ })
-  foreach ($port in $ports) {
-    if (-not (Set-LivePort $port)) { Warn ("ポート {0} への切り替えに失敗したので飛ばします" -f $port); continue }
-    Start-Sleep -Milliseconds 300
-    $r = Probe $port
-    Show-Probe $r "候補"
-    $tried.Value += $r
-    if (-not $best -or $r.score -lt $best.score) { $best = $r }
-    if (Test-Good $r) {
-      $floor = ($tried.Value | Where-Object { $_.min -ge 0 } | Measure-Object -Property min -Minimum).Minimum
-      if ($r.p90 -le $floor + $GoodMarginMs) { return $r }
-    }
-  }
-  return $best
-}
 function Summary([string]$color, [string[]]$lines) {
   Write-Host ""
   Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
@@ -236,7 +215,7 @@ function Summary([string]$color, [string[]]$lines) {
   Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
 }
 
-function Start-Monitor([int]$code) {
+function Start-Monitor([int]$code, [int[]]$prefer = @()) {
   # Stay in this window and keep watching the path (reroll.ps1 -Watch); switch ports live when it degrades.
   if ($NoWatch) { Done $code }
   $rr = Join-Path $PSScriptRoot 'reroll.ps1'
@@ -245,6 +224,7 @@ function Start-Monitor([int]$code) {
   $a = @{ Conf = $Conf; Watch = $true; NoPause = $true }
   if ($WatchMinutes -gt 0) { $a.WatchMinutes = $WatchMinutes }
   if ($InjectFlow) { $a.InjectFlow = $true }
+  if ($prefer.Count) { $a.PreferPorts = $prefer }   # ports that measured good: first choices when switching
   & $rr @a
   Done $code
 }
@@ -261,65 +241,60 @@ if (-not (Wait-Tunnel)) {
   Done 1
 }
 
-# ---------- 3. check the path ----------
-Step 3 "経路をチェック (トンネル内に 30 発、1.5 秒)"
+# ---------- 3. compare ports ----------
+Step 3 ("経路を比較 (今のポート + {0} ポート、約 {1} 秒)" -f $Candidates, [int](4 + $Candidates * 1.2))
 $curPort = Get-LivePort
 if (-not $curPort) { Fail "wg.exe でトンネルの状態を読めませんでした (管理者権限で実行していますか?)"; Done 1 }
 $cur = Probe $curPort
 if ($AssumeCurrentBad) { $cur.lost = $cur.lost + 30; $cur.score = 99999; Info "-AssumeCurrentBad: 今の経路を悪いとみなします (テスト用)" }
 Show-Probe $cur "現在"
-if ((Test-Good $cur) -and -not $Force) {
-  if ((Get-ConfPort) -ne $curPort) { Set-ConfPort $curPort }   # remember it for next time; no restart needed
-  Step 4 "保存"
-  Ok "今の経路のままで良好なので、再起動せずにそのまま使います"
-  Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $cur.port, $cur.min, $cur.p90, $cur.lost),
-    "次回からは WireGuard アプリで '$name' を有効化するだけでもつながります")
-  Start-Monitor 0
+$results = @($cur)
+foreach ($port in (Get-Random -Count $Candidates -InputObject (40000..60000) | Where-Object { $_ -ne $curPort })) {
+  if (-not (Set-LivePort $port)) { Warn ("ポート {0} への切り替えに失敗したので飛ばします" -f $port); continue }
+  Start-Sleep -Milliseconds 200
+  $r = Probe $port 20 40      # 20 echoes in 0.8 s per candidate; the winner is re-checked with the full probe
+  Show-Probe $r "候補"
+  $results += $r
 }
-if (-not (Test-Good $cur)) { Warn "今の経路は良くないので、トンネルを張ったまま別のポートを試します" } else { Info "-Force 指定: 良好でも他のポートを試します" }
-$tried = @($cur)
-$best = Find-GoodPort @($curPort) $Candidates ([ref]$tried)
-if (-not $best -or ($best.score -ge $cur.score -and -not (Test-Good $best))) {
-  [void](Set-LivePort $curPort)
-  Step 4 "保存"
-  Warn "どのポートも今より良くなりませんでした。元のポート $curPort のままにします"
-  Summary 'Yellow' @("経路全体が混んでいる可能性があります。トンネル自体は張れているので、このまま使えます。",
-    "監視を続けて、良くなる経路が見つかれば自動で切り替えます。")
-  Start-Monitor 1
-}
-if ($best.score -ge $cur.score -and (Test-Good $cur)) { $best = $cur; [void](Set-LivePort $curPort) }
+# Rank good ports by score (p90 + loss penalty), then by minimum. Bad ones only count if nothing is good.
+$good = @($results | Where-Object { Test-Good $_ } | Sort-Object score, min)
+$ranked = if ($good.Count) { $good } else { @($results | Sort-Object score, min) }
+$pick = $ranked[0]
+# Stay on a good current port unless a candidate is clearly better (1 ms is ICMP rounding).
+if ((Test-Good $cur) -and $pick.port -ne $curPort -and $pick.score -gt $cur.score - $SwitchMarginMs) { $pick = $cur }
 
-# ---------- 4. save ----------
-Step 4 "保存"
-if ($best.port -eq $curPort) {
-  if ((Get-ConfPort) -ne $curPort) { Set-ConfPort $curPort }
+# ---------- 4. apply ----------
+Step 4 "適用"
+$final = $null
+if ($pick.port -eq $curPort) {
+  [void](Set-LivePort $curPort)
+  $final = $cur
   Ok "今のポート $curPort が一番良いので、そのまま使います"
-  Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $best.port, $best.min, $best.p90, $best.lost))
-  Start-Monitor 0
+} else {
+  # Confirm the winner with the full 30-echo probe; fall back to the next good ones if it does not hold.
+  $order = @($pick) + @($ranked | Where-Object { $_.port -ne $pick.port -and $_.port -ne $curPort } | Select-Object -First 2)
+  foreach ($c in $order) {
+    if (-not (Set-LivePort $c.port)) { continue }
+    Start-Sleep -Milliseconds 300
+    $chk = Probe $c.port
+    Show-Probe $chk "確認"
+    if (Test-Good $chk) { $final = $chk; break }
+  }
+  if (-not $final) {
+    if (Test-Good $cur) { [void](Set-LivePort $curPort); $final = $cur; Warn "候補が確認で崩れたので、今のポート $curPort に戻します" }
+    else { [void](Set-LivePort $order[0].port); $final = Probe $order[0].port; Show-Probe $final "確認" }
+  }
+  if ($final.port -ne $curPort) { Ok ("ポート {0} -> {1} にその場で切り替えました (登録し直しなし)" -f $curPort, $final.port) }
 }
-Set-ConfPort $best.port
-Info ("ポート {0} を保存して登録し直します..." -f $best.port)
-Install-FromStore
-[void](Wait-Tunnel)
-$final = Probe $best.port
-Show-Probe $final "確認"
-if (-not (Test-Good $final)) {
-  # After a restart the flow can land on a bad path again. Keep the tunnel up and switch ports live
-  # until it is good, then remember that port.
-  Warn "再起動後に経路が変わりました。トンネルを張ったまま良い経路を探します"
-  # Retry the ports that measured good before the restart first (best first), then random ones.
-  $prevGood = @($tried | Where-Object { (Test-Good $_) -and $_.port -ne $best.port } | Sort-Object score | ForEach-Object { $_.port } | Select-Object -Unique)
-  $r = Find-GoodPort @($best.port) ($Candidates + 4) ([ref]$tried) $prevGood
-  # Find-GoodPort may return an earlier candidate than the one left live, so always apply the chosen port.
-  if ($r -and (Test-Good $r)) { [void](Set-LivePort $r.port); Set-ConfPort $r.port; $final = $r }
-  elseif ($r -and $r.score -lt $final.score) { [void](Set-LivePort $r.port); Set-ConfPort $r.port; $final = $r }
-  else { [void](Set-LivePort $best.port) }
-}
+if ((Get-ConfPort) -ne $final.port) { Set-ConfPort $final.port }   # next start-tunnel registers with this port
+$prefer = @($ranked | Where-Object { (Test-Good $_) -and $_.port -ne $final.port } | ForEach-Object { $_.port })
 if (Test-Good $final) {
   Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $final.port, $final.min, $final.p90, $final.lost),
+    ("良好だった他のポート {0} 個は、プレイ中の切り替え先の第一候補にします" -f $prefer.Count),
     "次回からは WireGuard アプリで '$name' を有効化するだけでもつながります")
-  Start-Monitor 0
+  Start-Monitor 0 $prefer
 }
 Summary 'Yellow' @(("一番ましな経路: ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $final.port, $final.min, $final.p90, $final.lost),
-  "良い経路が見つかりませんでした。監視を続けて、良くなる経路が見つかれば自動で切り替えます。")
-Start-Monitor 1
+  "良好なポートが見つかりませんでした。経路全体が混んでいる可能性があります。",
+  "監視を続けて、良くなる経路が見つかれば自動で切り替えます。")
+Start-Monitor 1 $prefer
