@@ -6,6 +6,9 @@
 # percentile, spread). A good path is kept as is (no restart). Otherwise it switches the listen port live with
 # `wg set` until a good path shows up, then saves that port. The tunnel is registered through the WireGuard
 # app's own config store, so it shows up in the GUI and can be toggled there afterwards.
+# Then the window stays open and keeps watching the path (reroll.ps1 -Watch): when the tunnel's own link turns
+# bad or keeps hitching, it moves to another port without dropping the game. Closing the window only stops the
+# watching; the tunnel stays up. -NoWatch ends after the setup instead.
 # Probe / Set-LivePort / Show-Probe are duplicated in reroll.ps1 on purpose: this file self-updates on its own.
 param(
   [string]$Conf,
@@ -13,6 +16,9 @@ param(
   [switch]$NoUpdate,
   [switch]$Force,           # scan other ports even when the current path looks fine
   [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad to exercise the switch / save / re-register branch
+  [switch]$NoWatch,         # end after setting up instead of staying to monitor the path
+  [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
+  [switch]$InjectFlow,      # testing aid: passed to reroll.ps1 -Watch (fake tunnel hitches to exercise a switch)
   [int]$Candidates = 8,
   [int]$MaxMs = 150,
   [int]$JitterMs = 15,
@@ -23,7 +29,7 @@ $ErrorActionPreference = 'Continue'
 
 # ---------- screen ----------
 function Rule([string]$c = 'DarkCyan') { Write-Host ("  " + ('=' * 58)) -ForegroundColor $c }
-function Step([int]$n, [string]$text) { Write-Host ""; Write-Host ("  [{0}/4] {1}" -f $n, $text) -ForegroundColor White }
+function Step([int]$n, [string]$text) { Write-Host ""; Write-Host ("  [{0}/5] {1}" -f $n, $text) -ForegroundColor White }
 function Info([string]$t) { Write-Host "        $t" -ForegroundColor Gray }
 function Ok([string]$t) { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn([string]$t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
@@ -230,6 +236,19 @@ function Summary([string]$color, [string[]]$lines) {
   Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
 }
 
+function Start-Monitor([int]$code) {
+  # Stay in this window and keep watching the path (reroll.ps1 -Watch); switch ports live when it degrades.
+  if ($NoWatch) { Done $code }
+  $rr = Join-Path $PSScriptRoot 'reroll.ps1'
+  if (-not (Test-Path $rr)) { Warn "reroll.ps1 が見つからないので監視は省略します (次回の実行で自動取得されます)"; Done $code }
+  Step 5 "経路を監視 (プレイ中はこのウィンドウを開いたままに)"
+  $a = @{ Conf = $Conf; Watch = $true; NoPause = $true }
+  if ($WatchMinutes -gt 0) { $a.WatchMinutes = $WatchMinutes }
+  if ($InjectFlow) { $a.InjectFlow = $true }
+  & $rr @a
+  Done $code
+}
+
 # ---------- 2. register ----------
 Step 2 "トンネルを登録"
 Install-FromStore
@@ -254,9 +273,8 @@ if ((Test-Good $cur) -and -not $Force) {
   Step 4 "保存"
   Ok "今の経路のままで良好なので、再起動せずにそのまま使います"
   Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $cur.port, $cur.min, $cur.p90, $cur.lost),
-    "次回からは WireGuard アプリで '$name' を有効化するだけで OK",
-    "プレイ中にラグい時は reroll.bat (試合を切らずに経路だけ変える)")
-  Done 0
+    "次回からは WireGuard アプリで '$name' を有効化するだけでもつながります")
+  Start-Monitor 0
 }
 if (-not (Test-Good $cur)) { Warn "今の経路は良くないので、トンネルを張ったまま別のポートを試します" } else { Info "-Force 指定: 良好でも他のポートを試します" }
 $tried = @($cur)
@@ -265,9 +283,9 @@ if (-not $best -or ($best.score -ge $cur.score -and -not (Test-Good $best))) {
   [void](Set-LivePort $curPort)
   Step 4 "保存"
   Warn "どのポートも今より良くなりませんでした。元のポート $curPort のままにします"
-  Summary 'Yellow' @("経路全体が混んでいる可能性があります。時間をおいて再実行してください。",
-    "トンネル自体は張れているので、このまま使うこともできます。")
-  Done 1
+  Summary 'Yellow' @("経路全体が混んでいる可能性があります。トンネル自体は張れているので、このまま使えます。",
+    "監視を続けて、良くなる経路が見つかれば自動で切り替えます。")
+  Start-Monitor 1
 }
 if ($best.score -ge $cur.score -and (Test-Good $cur)) { $best = $cur; [void](Set-LivePort $curPort) }
 
@@ -276,9 +294,8 @@ Step 4 "保存"
 if ($best.port -eq $curPort) {
   if ((Get-ConfPort) -ne $curPort) { Set-ConfPort $curPort }
   Ok "今のポート $curPort が一番良いので、そのまま使います"
-  Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $best.port, $best.min, $best.p90, $best.lost),
-    "プレイ中にラグい時は reroll.bat")
-  Done 0
+  Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $best.port, $best.min, $best.p90, $best.lost))
+  Start-Monitor 0
 }
 Set-ConfPort $best.port
 Info ("ポート {0} を保存して登録し直します..." -f $best.port)
@@ -300,10 +317,9 @@ if (-not (Test-Good $final)) {
 }
 if (Test-Good $final) {
   Summary 'Green' @(("準備完了  ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $final.port, $final.min, $final.p90, $final.lost),
-    "次回からは WireGuard アプリで '$name' を有効化するだけで OK",
-    "プレイ中にラグい時は reroll.bat (試合を切らずに経路だけ変える)")
-  Done 0
+    "次回からは WireGuard アプリで '$name' を有効化するだけでもつながります")
+  Start-Monitor 0
 }
 Summary 'Yellow' @(("一番ましな経路: ポート {0}  /  最小 {1} ms  /  90% {2} ms  /  ロス {3}" -f $final.port, $final.min, $final.p90, $final.lost),
-  "良い経路が見つかりませんでした。時間をおいて再実行してください。")
-Done 1
+  "良い経路が見つかりませんでした。監視を続けて、良くなる経路が見つかれば自動で切り替えます。")
+Start-Monitor 1
