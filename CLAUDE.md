@@ -8,6 +8,7 @@
 - 稼働中: CloudFormation スタック `csvpn-sg` (ap-southeast-1)、EIP 52.74.31.125、UDP 51820、トンネル網 10.66.0.0/24 (サーバー .1、クライアント .11〜.13)。
 - スタックのパラメータ ClientNames は作成時の値のままで、現在のクライアント名 (clients/ のファイル名) とは一致しない。2026-09-24 に各人の名前へリネームしたが、鍵はそのままでファイル名とサーバー側コメントを付け替えただけ。**パラメータを変えると UserData が変わりインスタンスが再作成され、鍵と EIP が変わる**ので触らない。
 - EventBridge Scheduler で毎日 19:00 JST 起動 / 02:00 JST 停止。停止/起動で EIP・IPv6・鍵は保持され、wg-quick@wg0 は自動起動。停止→起動の一巡は 2026-09-26 に確認済み (19:00 の自動起動後、同じ鍵・EIP でそのまま接続できた)。CPU クレジットは unlimited。
+- **公開の段階 (2026-10-06)**: master は友人向けの安定版で、start-tunnel は 70a5bc6 の版 (9/25〜10/05 に 3 人が実戦で使った 13 ポート総当たり方式、reroll なし)。今日の新方式 (13 ポートを揺れ込みで比較してその場で移る、常駐監視と自動切り替え、reroll) は `beta` ブランチ。所有者の PC は作業ツリーを beta にしてあり、beta の start-tunnel.bat は `-NoSelfUpdate` 付きなので master の版で上書きされない (宛先リストは今までどおり master から更新)。所有者が実戦で確認したら beta を master に取り込み、その際 start-tunnel.bat の `-NoSelfUpdate` を外す。
 - 公開リポジトリ: https://github.com/PrankWorks/cs2vpn (origin は HTTPS、ブランチ master)。秘密鍵入りの `clients/`、`bundles/`、`*.conf` は .gitignore 済み。public なので自宅 IP・AWS アカウント ID・インスタンス ID・鍵・各人のハンドル名を書かないこと (クライアント名は owner/mate1/mate2 などの汎用名で表記する)。
 
 ## 構成の要点
