@@ -12,6 +12,7 @@ param(
   [switch]$NoPause,
   [switch]$NoUpdate,
   [switch]$Force,           # scan other ports even when the current path looks fine
+  [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad to exercise the switch / save / re-register branch
   [int]$Candidates = 8,
   [int]$MaxMs = 150,
   [int]$JitterMs = 15,
@@ -203,10 +204,12 @@ function Set-LivePort([int]$port) {
   return ($now -eq $port)
 }
 function Get-LivePort { [int]((& $wg show $name listen-port 2>$null) | Select-Object -First 1) }
-function Find-GoodPort($skip, [int]$count, [ref]$tried) {
-  # Try ports live (no restart) and stop at the first good one. Returns the best result seen (may be bad).
+function Find-GoodPort($skip, [int]$count, [ref]$tried, $first = @()) {
+  # Try ports live (no restart) and stop at the first good one: the $first ports in order, then random ones.
+  # Returns the best result seen (may be bad); the port left live may differ from it.
   $best = $null
-  foreach ($port in (Get-Random -Count $count -InputObject (40000..60000) | Where-Object { $skip -notcontains $_ })) {
+  $ports = @($first | Where-Object { $skip -notcontains $_ }) + @(Get-Random -Count $count -InputObject (40000..60000) | Where-Object { $skip -notcontains $_ -and $first -notcontains $_ })
+  foreach ($port in $ports) {
     if (-not (Set-LivePort $port)) { Warn ("ポート {0} への切り替えに失敗したので飛ばします" -f $port); continue }
     Start-Sleep -Milliseconds 300
     $r = Probe $port
@@ -244,6 +247,7 @@ Step 3 "経路をチェック (トンネル内に 30 発、1.5 秒)"
 $curPort = Get-LivePort
 if (-not $curPort) { Fail "wg.exe でトンネルの状態を読めませんでした (管理者権限で実行していますか?)"; Done 1 }
 $cur = Probe $curPort
+if ($AssumeCurrentBad) { $cur.lost = $cur.lost + 30; $cur.score = 99999; Info "-AssumeCurrentBad: 今の経路を悪いとみなします (テスト用)" }
 Show-Probe $cur "現在"
 if ((Test-Good $cur) -and -not $Force) {
   if ((Get-ConfPort) -ne $curPort) { Set-ConfPort $curPort }   # remember it for next time; no restart needed
@@ -286,8 +290,9 @@ if (-not (Test-Good $final)) {
   # After a restart the flow can land on a bad path again. Keep the tunnel up and switch ports live
   # until it is good, then remember that port.
   Warn "再起動後に経路が変わりました。トンネルを張ったまま良い経路を探します"
-  $skip = @($tried | ForEach-Object { $_.port })
-  $r = Find-GoodPort $skip ($Candidates + 4) ([ref]$tried)
+  # Retry the ports that measured good before the restart first (best first), then random ones.
+  $prevGood = @($tried | Where-Object { (Test-Good $_) -and $_.port -ne $best.port } | Sort-Object score | ForEach-Object { $_.port } | Select-Object -Unique)
+  $r = Find-GoodPort @($best.port) ($Candidates + 4) ([ref]$tried) $prevGood
   # Find-GoodPort may return an earlier candidate than the one left live, so always apply the chosen port.
   if ($r -and (Test-Good $r)) { [void](Set-LivePort $r.port); Set-ConfPort $r.port; $final = $r }
   elseif ($r -and $r.score -lt $final.score) { [void](Set-LivePort $r.port); Set-ConfPort $r.port; $final = $r }
