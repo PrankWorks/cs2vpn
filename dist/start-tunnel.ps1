@@ -14,6 +14,7 @@ param(
   [string]$Conf,
   [switch]$NoPause,
   [switch]$NoUpdate,
+  [switch]$NoSelfUpdate,    # keep this script and reroll as they are (still refresh the destination list); the beta bat passes it
   [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad so another port must win
   [switch]$NoWatch,         # end after setting up instead of staying to monitor the path
   [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
@@ -43,7 +44,7 @@ $RepoBase = ($ListUrl -replace 'split-allowed-ips\.txt$', '')
 # raw.githubusercontent.com is cached by a CDN for several minutes; a changing query string bypasses it.
 $cb = "?t=" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $ListUrl += $cb
-if (-not $NoUpdate -and $PSCommandPath) {
+if (-not $NoUpdate -and -not $NoSelfUpdate -and $PSCommandPath) {
   # Helpers are refreshed on every run, including the re-run right after this script updated itself.
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -61,7 +62,7 @@ if (-not $NoUpdate -and $PSCommandPath) {
     }
   } catch { }
 }
-if (-not $NoUpdate -and -not $env:CSVPN_UPDATED -and $PSCommandPath) {
+if (-not $NoUpdate -and -not $NoSelfUpdate -and -not $env:CSVPN_UPDATED -and $PSCommandPath) {
   try {
     $latest = ((Invoke-WebRequest -UseBasicParsing -TimeoutSec 15 -Uri ($RepoBase + "dist/start-tunnel.ps1" + $cb)).Content).TrimStart([char]0xFEFF)
     $mine = ([IO.File]::ReadAllText($PSCommandPath)).TrimStart([char]0xFEFF)
