@@ -14,7 +14,7 @@ param(
   [string]$Conf,
   [switch]$NoPause,
   [switch]$NoUpdate,
-  [switch]$NoSelfUpdate,    # keep this script and reroll as they are (still refresh the destination list); the beta bat passes it
+  [switch]$NoSelfUpdate,    # keep this script and reroll as they are (still refresh the destination list); for testing a local copy
   [switch]$AssumeCurrentBad, # testing aid: treat the current path as bad so another port must win
   [switch]$NoWatch,         # end after setting up instead of staying to monitor the path
   [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
