@@ -20,7 +20,7 @@ param(
   [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
   [switch]$InjectFlow,      # testing aid: passed to reroll.ps1 -Watch (fake tunnel hitches to exercise a switch)
   [int]$Candidates = 12,    # ports compared besides the current one (13 in total)
-  [int]$SwitchMarginMs = 2, # leave a good current port only for a candidate at least this much better
+  [int]$SwitchMarginMs = 0, # optional hysteresis: leave a good current port only for a candidate this much better
   [int]$MaxMs = 150,
   [int]$JitterMs = 15,
   [string]$ListUrl = "https://raw.githubusercontent.com/PrankWorks/cs2vpn/master/split-allowed-ips.txt"
@@ -209,6 +209,13 @@ function Set-LivePort([int]$port) {
   return ($now -eq $port)
 }
 function Get-LivePort { [int]((& $wg show $name listen-port 2>$null) | Select-Object -First 1) }
+function Select-Port($results, [int]$curPort) {
+  # Rank good ports by score (p90 + loss penalty), then by minimum; on a full tie the current port goes first.
+  # All results must come from the same probe size, or the p90s are not comparable.
+  $good = @($results | Where-Object { Test-Good $_ })
+  $pool = if ($good.Count) { $good } else { @($results) }
+  @($pool | Sort-Object score, min, @{ Expression = { if ($_.port -eq $curPort) { 0 } else { 1 } } })
+}
 function Summary([string]$color, [string[]]$lines) {
   Write-Host ""
   Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
@@ -243,10 +250,10 @@ if (-not (Wait-Tunnel)) {
 }
 
 # ---------- 3. compare ports ----------
-Step 3 ("経路を比較 (今のポート + {0} ポート、約 {1} 秒)" -f $Candidates, [int](4 + $Candidates * 1.2))
+Step 3 ("経路を比較 (今のポート + {0} ポートを同じ条件で測定、約 {1} 秒)" -f $Candidates, [int](3 + $Candidates * 1.2))
 $curPort = Get-LivePort
 if (-not $curPort) { Fail "wg.exe でトンネルの状態を読めませんでした (管理者権限で実行していますか?)"; Done 1 }
-$cur = Probe $curPort
+$cur = Probe $curPort 20 40     # same probe size as the candidates, so their p90s compare fairly
 if ($AssumeCurrentBad) { $cur.lost = $cur.lost + 30; $cur.score = 99999; Info "-AssumeCurrentBad: 今の経路を悪いとみなします (テスト用)" }
 Show-Probe $cur "現在"
 $results = @($cur)
@@ -257,12 +264,11 @@ foreach ($port in (Get-Random -Count $Candidates -InputObject (40000..60000) | W
   Show-Probe $r "候補"
   $results += $r
 }
-# Rank good ports by score (p90 + loss penalty), then by minimum. Bad ones only count if nothing is good.
-$good = @($results | Where-Object { Test-Good $_ } | Sort-Object score, min)
-$ranked = if ($good.Count) { $good } else { @($results | Sort-Object score, min) }
+# Bad ports only count if nothing is good.
+$ranked = Select-Port $results $curPort
 $pick = $ranked[0]
-# Stay on a good current port unless a candidate is clearly better (1 ms is ICMP rounding).
-if ((Test-Good $cur) -and $pick.port -ne $curPort -and $pick.score -gt $cur.score - $SwitchMarginMs) { $pick = $cur }
+if ($SwitchMarginMs -gt 0 -and (Test-Good $cur) -and $pick.port -ne $curPort -and $pick.score -gt $cur.score - $SwitchMarginMs) { $pick = $cur }
+$runnerUp = $ranked | Where-Object { $_.port -ne $pick.port } | Select-Object -First 1
 
 # ---------- 4. apply ----------
 Step 4 "適用"
@@ -270,8 +276,10 @@ $final = $null
 if ($pick.port -eq $curPort) {
   [void](Set-LivePort $curPort)
   $final = $cur
-  Ok "今のポート $curPort が一番良いので、そのまま使います"
+  $nx = if ($runnerUp) { "  (次点: ポート {0}  {1}/{2} ms  ロス {3})" -f $runnerUp.port, $runnerUp.min, $runnerUp.p90, $runnerUp.lost } else { '' }
+  Ok ("今のポート {0} ({1}/{2} ms) が 13 ポート中で一番良いので、そのまま使います{3}" -f $curPort, $cur.min, $cur.p90, $nx)
 } else {
+  Info ("ポート {0} ({1}/{2} ms) が今のポート ({3}/{4} ms) より良いので、確かめてから移ります" -f $pick.port, $pick.min, $pick.p90, $cur.min, $cur.p90)
   # Confirm the winner with the full 30-echo probe; fall back to the next good ones if it does not hold.
   $order = @($pick) + @($ranked | Where-Object { $_.port -ne $pick.port -and $_.port -ne $curPort } | Select-Object -First 2)
   foreach ($c in $order) {
