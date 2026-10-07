@@ -3,3 +3,5 @@ clients/
 *.conf
 !cfn/*.yaml
 bundles/
+# monitor / lag-watch CSV logs written next to the scripts
+logs/
