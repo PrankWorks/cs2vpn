@@ -28,6 +28,8 @@ param(
   [int]$WatchMinutes = 0,   # 0 = until the window is closed
   [switch]$InjectFlow,      # testing aid for -Watch: fake tunnel-only hitches at 20/30/40 s to exercise a switch
   [int[]]$PreferPorts = @(), # -Watch: ports that measured good at startup, tried first (in order) when switching
+  [switch]$Preview,         # -Watch with fake samples: shows the monitor screen, touches nothing
+  [int]$PreviewPort = 50720, # -Preview: the port start-tunnel's preview ended on
   [int]$SpikeMs = 20,
   [int]$MergeMs = 150,
   [int]$RateCount = 3,
@@ -39,18 +41,47 @@ $wg = "C:\Program Files\WireGuard\wg.exe"
 $gw = "10.66.0.1"
 
 # ---------- screen ----------
-function Rule([string]$c = 'DarkCyan') { Write-Host ("  " + ('=' * 58)) -ForegroundColor $c }
-function Info([string]$t) { Write-Host "        $t" -ForegroundColor Gray }
-function Ok([string]$t) { Write-Host "    OK  $t" -ForegroundColor Green }
-function Warn([string]$t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
-function Fail([string]$t) { Write-Host "    NG  $t" -ForegroundColor Red }
-function Done($code) { if (-not $NoPause) { Write-Host ""; Read-Host "  Enter キーで閉じる" | Out-Null }; exit $code }
-function Summary([string]$color, [string[]]$lines) {
-  Write-Host ""
-  Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
-  foreach ($l in $lines) { Write-Host "   $l" -ForegroundColor $color }
-  Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
+# Plain console features only (16 colours, ASCII, background-coloured spaces), so it looks the same in the classic
+# console and in Windows Terminal on any PC. CJK text takes 2 columns; everything else used here takes 1.
+$UiWidth = 72
+function Get-DisplayWidth([string]$s) {
+  $w = 0
+  foreach ($ch in $s.ToCharArray()) {
+    $c = [int]$ch
+    if (($c -ge 0x1100 -and $c -le 0x115F) -or ($c -ge 0x2E80 -and $c -le 0xA4CF) -or ($c -ge 0xAC00 -and $c -le 0xD7A3) -or
+        ($c -ge 0xF900 -and $c -le 0xFAFF) -or ($c -ge 0xFE30 -and $c -le 0xFE4F) -or ($c -ge 0xFF00 -and $c -le 0xFF60) -or
+        ($c -ge 0xFFE0 -and $c -le 0xFFE6)) { $w += 2 } else { $w++ }
+  }
+  $w
 }
+function PadTo([string]$s, [int]$w) { $s + (' ' * [math]::Max(0, $w - (Get-DisplayWidth $s))) }
+function Badge([string]$text, [string]$bg, [string]$fg = 'Black') { Write-Host " $text " -NoNewline -BackgroundColor $bg -ForegroundColor $fg }
+function Band([string]$text, [string]$bg, [string]$fg = 'White') {
+  # Full-width coloured bar; the line always ends in the default colours so nothing bleeds when the window scrolls.
+  Write-Host "  " -NoNewline
+  Write-Host (PadTo $text $UiWidth) -NoNewline -BackgroundColor $bg -ForegroundColor $fg
+  Write-Host ""
+}
+function Header([string]$sub) {
+  Write-Host ""
+  Band "" 'DarkCyan'
+  Band ("   CSVPN   //   Singapore exit node   //   {0}" -f $sub) 'DarkCyan' 'White'
+  Band "" 'DarkCyan'
+}
+function Step([int]$n, [string]$text) { Write-Host ""; Write-Host "  " -NoNewline; Badge ("STEP {0}/5" -f $n) 'DarkCyan' 'White'; Write-Host "  $text" -ForegroundColor White }
+function Info([string]$t) { Write-Host "         $t" -ForegroundColor Gray }
+function Ok([string]$t) { Write-Host "    " -NoNewline; Badge 'OK' 'DarkGreen' 'White'; Write-Host " $t" -ForegroundColor Green }
+function Warn([string]$t) { Write-Host "    " -NoNewline; Badge '!!' 'DarkYellow' 'Black'; Write-Host " $t" -ForegroundColor Yellow }
+function Fail([string]$t) { Write-Host "    " -NoNewline; Badge 'NG' 'DarkRed' 'White'; Write-Host " $t" -ForegroundColor Red }
+function Summary([string]$color, [string[]]$lines) {
+  $bg = switch ($color) { 'Green' { 'DarkGreen' } 'Yellow' { 'DarkYellow' } default { 'DarkGray' } }
+  $fg = if ($color -eq 'Yellow') { 'Black' } else { 'White' }
+  Write-Host ""
+  Band "" $bg $fg
+  foreach ($l in $lines) { Band "   $l" $bg $fg }
+  Band "" $bg $fg
+}
+function Done($code) { if (-not $NoPause) { Write-Host ""; Write-Host "  " -NoNewline; Badge 'Enter' 'DarkGray' 'White'; Read-Host " キーで閉じる" | Out-Null }; exit $code }
 
 # ---------- one-shot measurement / switching ----------
 function Probe([int]$port) {
@@ -70,16 +101,29 @@ function Probe([int]$port) {
   [pscustomobject]@{ port = $port; min = $ok[0]; p90 = $p90; lost = $lost; score = $p90 + 20 * $lost }
 }
 function Test-Good($r) { $r.min -ge 0 -and $r.lost -eq 0 -and $r.min -lt $MaxMs -and ($r.p90 - $r.min) -le $JitterMs }
+function Get-Quality($r) {
+  if ($r.min -lt 0) { return @('応答なし', 'DarkRed', 'White') }
+  if ($r.min -ge $MaxMs) { return @('外れ経路', 'DarkRed', 'White') }
+  if (-not (Test-Good $r)) { return @('揺れ/ロス', 'DarkYellow', 'Black') }
+  @('良好', 'DarkGreen', 'White')
+}
+function Write-Bar($r, [int]$cells = 25) {
+  # 90th percentile on a 70..120 ms scale (2 ms per cell) in the quality colour, on a dark track.
+  $q = Get-Quality $r
+  $n = if ($r.p90 -gt 0) { [math]::Max(1, [math]::Min($cells, [int][math]::Round(($r.p90 - 70) / 2.0))) } else { 0 }
+  if ($n -gt 0) { Write-Host (' ' * $n) -NoNewline -BackgroundColor $q[1] }
+  if ($cells -gt $n) { Write-Host (' ' * ($cells - $n)) -NoNewline -BackgroundColor DarkGray }
+}
+function Write-Numbers($r, [string]$fc = 'White') {
+  if ($r.min -lt 0) { Write-Host "    -- /  -- ms  ロス--  " -NoNewline -ForegroundColor DarkGray }
+  else { Write-Host ("  {0,3} / {1,3} ms  ロス{2,2}  " -f $r.min, $r.p90, $r.lost) -NoNewline -ForegroundColor $fc }
+}
 function Show-Probe($r, [string]$label) {
-  if ($r.min -lt 0) { $q = '応答なし'; $c = 'DarkRed' }
-  elseif ($r.min -ge $MaxMs) { $q = '外れ経路'; $c = 'Red' }
-  elseif (-not (Test-Good $r)) { $q = '揺れ/ロス'; $c = 'Yellow' }
-  else { $q = '良好'; $c = 'Green' }
-  $bar = if ($r.p90 -gt 0) { '#' * [math]::Min(30, [math]::Max(1, [int]($r.p90 / 10))) } else { '' }
-  Write-Host ("        {0,-4} ポート {1,5}  " -f $label, $r.port) -NoNewline -ForegroundColor Gray
-  Write-Host ("{0,-30}" -f $bar) -NoNewline -ForegroundColor $c
-  if ($r.min -lt 0) { Write-Host "  ----" -NoNewline -ForegroundColor $c } else { Write-Host ("  {0,3}/{1,3} ms  ロス {2,-2}" -f $r.min, $r.p90, $r.lost) -NoNewline -ForegroundColor White }
-  Write-Host ("  [{0}]" -f $q) -ForegroundColor $c
+  $q = Get-Quality $r
+  Write-Host ("    {0}  {1,5}  " -f $label, $r.port) -NoNewline -ForegroundColor Gray
+  Write-Bar $r
+  Write-Numbers $r
+  Badge $q[0] $q[1] $q[2]; Write-Host ""
 }
 function Set-LivePort([int]$port) {
   # Apply the port and read it back; a failed `wg set` must not be mistaken for a measured path.
@@ -115,7 +159,7 @@ function Initialize-Monitor([long]$now = 0) {
     blips = 0; switches = 0; state = 'OK'; downSwitchAt = -1L; downWarned = $false
     lastRateSwitch = -1L; ineffective = 0; pauseUntil = -1L; sustainedTimes = New-Object System.Collections.Generic.List[long]
     guardUntil = -1L; guardTries = 0; globalMin = -1; lastSwitchAt = -1L; lastPathNote = -100000L; graceUntil = -1L; recentPorts = New-Object System.Collections.Generic.List[int]
-    prefer = New-Object System.Collections.Generic.List[int]
+    prefer = New-Object System.Collections.Generic.List[int]; timeline = New-Object System.Collections.Generic.List[string]
     port = 0; t0 = (Get-Date) }
 }
 function Process-MSample($tg, [long]$t, [int]$rtt) {
@@ -149,16 +193,25 @@ function Get-Window($tg, [long]$now, [int]$ms) {
   $s = @($tg.recent | Where-Object { $_.t -gt $end - $ms })
   $ok = @($s | Where-Object { $_.rtt -ge 0 } | ForEach-Object { $_.rtt } | Sort-Object)
   $loss = if ($s.Count) { 100.0 * ($s.Count - $ok.Count) / $s.Count } else { 0 }
-  [pscustomobject]@{ n = $s.Count; min = $(if ($ok.Count) { $ok[0] } else { -1 }); med = $(if ($ok.Count) { $ok[[int][math]::Floor($ok.Count / 2)] } else { -1 }); loss = $loss }
+  $spk = if ($tg.baseline -ge 0) { @($ok | Where-Object { $_ -gt $tg.baseline + $SpikeMs }).Count } else { 0 }
+  [pscustomobject]@{ n = $s.Count; min = $(if ($ok.Count) { $ok[0] } else { -1 }); med = $(if ($ok.Count) { $ok[[int][math]::Floor($ok.Count / 2)] } else { -1 }); loss = $loss; spk = $spk }
 }
 function Write-MLine([string]$kind, [string]$text, [string]$color, [long]$now) {
   $when = $script:mon.t0.AddMilliseconds($now)
+  $tag = switch ($kind) {
+    'flow'   { @('跳ね', 'DarkYellow', 'Black') }
+    'path'   { @('全体', 'DarkMagenta', 'White') }
+    'switch' { @('切替', 'DarkCyan', 'White') }
+    'error'  { @('失敗', 'DarkRed', 'White') }
+    'note'   { if ($color -eq 'Magenta') { @('注意', 'DarkMagenta', 'White') } else { @('注意', 'DarkYellow', 'Black') } }
+    default  { switch ($color) { 'Red' { @('状態', 'DarkRed', 'White') } 'Green' { @('復帰', 'DarkGreen', 'White') } 'Cyan' { @('監視', 'DarkCyan', 'White') } default { @('状態', 'DarkGray', 'White') } } }
+  }
   Clear-Status
   Write-Host ("  {0:HH:mm:ss}  " -f $when) -NoNewline -ForegroundColor DarkGray
-  Write-Host $text -ForegroundColor $color
+  Badge $tag[0] $tag[1] $tag[2]
+  Write-Host " $text" -ForegroundColor $color
   if ($script:monLog) { try { Add-Content -Path $script:monLog -Encoding UTF8 -Value ('{0:yyyy-MM-ddTHH:mm:ss.fff},{1},"{2}"' -f $when, $kind, ($text -replace '"', "'")) } catch { } }
 }
-function Get-DisplayWidth([string]$s) { $w = 0; foreach ($ch in $s.ToCharArray()) { if ([int]$ch -ge 0x1100) { $w += 2 } else { $w++ } }; $w }
 function Clear-Status { if ($script:statusLen -gt 0) { Write-Host ("`r" + (' ' * $script:statusLen) + "`r") -NoNewline; $script:statusLen = 0 } }
 function Invoke-Switch([string]$reason, [long]$now) {
   # Next port that measured good at startup (if any), else a random one not used recently. Applied live and
@@ -273,35 +326,65 @@ function Step-Monitor([long]$now) {
     [void](Invoke-Switch ("直近 {0} 秒でトンネルの跳ね {1} 回" -f $RateWindowSec, $m.flowTimes.Count) $now)
   }
 }
+function Update-Timeline([long]$now) {
+  # One cell per second: green = calm, yellow = a hitch or a lost echo, red = bad, grey = no data / node down.
+  $m = $script:mon; $tun = $m.tunnel
+  $w = Get-Window $tun $now 1000
+  $c = if ($m.state -ne 'OK' -or $w.n -eq 0) { 'DarkGray' }
+       elseif ($w.loss -ge 20 -or ($tun.baseline -ge 0 -and $w.med -gt $tun.baseline + 30)) { 'DarkRed' }
+       elseif ($w.loss -gt 0 -or $w.spk -gt 0) { 'DarkYellow' }
+       else { 'DarkGreen' }
+  $m.timeline.Add($c); while ($m.timeline.Count -gt 30) { $m.timeline.RemoveAt(0) }
+}
 function Show-Status([long]$now) {
   $m = $script:mon; $w = Get-Window $m.tunnel $now 5000
-  $st = switch ($m.state) { 'NODE' { 'ノード停止中' } 'DOWN' { 'トンネル無応答' } default { if ($m.pauseUntil -ge 0) { '監視中 (切替休止)' } else { '監視中' } } }
-  $rt = if ($w.min -ge 0) { "{0}/{1} ms" -f $w.min, $w.med } else { '---' }
-  $line = "  {0:HH:mm:ss} {1} | ポート {2} | {3} ロス{4:N0}% | 跳ね {5}/{6} 全体 {7} 単発 {8} | 切替 {9}" -f $m.t0.AddMilliseconds($now), $st, $m.port, $rt, $w.loss, $m.flowTimes.Count, $RateCount, $m.pathTimes.Count, $m.blips, $m.switches
-  # Keep the line inside the window: a wrapped status line cannot be rewritten in place with `r.
+  Update-Timeline $now
+  $badge = switch ($m.state) { 'NODE' { @('停止中', 'DarkRed', 'White') } 'DOWN' { @('無応答', 'DarkRed', 'White') }
+    default { if ($m.pauseUntil -ge 0) { @('休止中', 'DarkYellow', 'Black') } else { @('監視中', 'DarkGreen', 'White') } } }
+  $rt = if ($w.min -ge 0) { "{0}/{1} ms" -f $w.min, $w.med } else { '--- ms' }
+  $text = " {0:HH:mm:ss}  ポート {1}  {2}  ロス{3,3:N0}%  跳ね {4}/{5}  切替 {6}  " -f $m.t0.AddMilliseconds($now), $m.port, $rt, $w.loss, $m.flowTimes.Count, $RateCount, $m.switches
+  # Keep the whole line inside the window: a wrapped status line cannot be rewritten in place with `r.
   $max = 100; try { $max = $Host.UI.RawUI.WindowSize.Width - 2 } catch { }
-  while ((Get-DisplayWidth $line) -gt $max -and $line.Length -gt 10) { $line = $line.Substring(0, $line.Length - 1) }
-  $width = Get-DisplayWidth $line
-  Write-Host ("`r" + $line + (' ' * [math]::Max(0, $script:statusLen - $width))) -NoNewline -ForegroundColor $(if ($m.state -ne 'OK') { 'Red' } elseif ($m.flowTimes.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
+  $fixed = 2 + (Get-DisplayWidth $badge[0]) + 2 + (Get-DisplayWidth $text)
+  $cells = [math]::Max(0, [math]::Min($m.timeline.Count, $max - $fixed))
+  Write-Host "`r  " -NoNewline
+  Badge $badge[0] $badge[1] $badge[2]
+  Write-Host $text -NoNewline -ForegroundColor $(if ($m.flowTimes.Count -gt 0) { 'Yellow' } else { 'Gray' })
+  for ($i = $m.timeline.Count - $cells; $i -lt $m.timeline.Count; $i++) { Write-Host ' ' -NoNewline -BackgroundColor $m.timeline[$i] }
+  $width = $fixed + $cells
+  if ($script:statusLen -gt $width) { Write-Host (' ' * ($script:statusLen - $width)) -NoNewline }
   $script:statusLen = $width
   try { $Host.UI.RawUI.WindowTitle = "csvpn 監視中 | ポート $($m.port) | $rt" } catch { }
+}
+function Get-PreviewRtt([string]$n, [long]$t, [int]$port) {
+  # Fake samples for -Preview: three tunnel-only hitches on the first port (-> a switch), a whole-path hitch, a blip.
+  $r = $(if ($n -eq 'TUNNEL') { 79 } else { 80 }) + (Get-Random -Minimum 0 -Maximum 3)
+  $s = $t / 1000.0
+  if ($n -eq 'TUNNEL' -and $port -eq $script:pvFirst) { foreach ($h in 8, 15, 22) { if ($s -ge $h -and $s -lt $h + 0.35) { return $r + 95 } } }
+  if ($s -ge 38 -and $s -lt 38.3) { return $r + 70 }
+  if ($n -eq 'TUNNEL' -and $s -ge 31 -and $s -lt 31.05) { return $r + 60 }
+  $r
 }
 
 function Start-Watch {
   $script:statusLen = 0
   $script:monLog = $Log
   try { $d = Split-Path $Log; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }; if (-not (Test-Path $Log)) { 'time,type,detail' | Set-Content -Path $Log -Encoding UTF8 } } catch { $script:monLog = $null }
-  $ep = (Get-Content $Conf | Where-Object { $_ -match '^\s*Endpoint\s*=' }) -replace '^\s*Endpoint\s*=\s*', '' -replace ':\d+\s*$', ''
+  $ep = if ($Preview) { '52.74.31.125' } else { (Get-Content $Conf | Where-Object { $_ -match '^\s*Endpoint\s*=' }) -replace '^\s*Endpoint\s*=\s*', '' -replace ':\d+\s*$', '' }
   Initialize-Monitor
   $m = $script:mon
   if ($ep) { $m.aws = New-MTarget 'AWS' $ep.Trim() }
   $m.port = Get-LivePort
   foreach ($p in $PreferPorts) { if ($p -and $p -ne $m.port) { $m.prefer.Add($p) } }
+  $script:pvFirst = $m.port
   Write-Host ""
   Write-Host "  経路の監視を続けます (このウィンドウを閉じても、トンネルはそのまま使えます)" -ForegroundColor White
   Info ("トンネル内 10.66.0.1 と出口ノード {0} を 1 秒 20 回ずつ測定。記録: {1}" -f $(if ($m.aws) { $m.aws.ip } else { '(なし)' }), $Log)
   Info ("トンネルだけが数秒続けて悪い、または {0} 秒で {1} 回跳ねたら、試合を切らずに別の経路へ切り替えます" -f $RateWindowSec, $RateCount)
   if ($m.prefer.Count) { Info ("切り替え先は、起動時に良好だったポート {0} 個から順に使います" -f $m.prefer.Count) }
+  Write-Host "         右端の帯は直近 30 秒 (1 マス 1 秒、右が最新):  " -NoNewline -ForegroundColor Gray
+  foreach ($lg in @(@('DarkGreen', '安定'), @('DarkYellow', '跳ね'), @('DarkRed', '悪い'), @('DarkGray', 'なし'))) { Write-Host '  ' -NoNewline -BackgroundColor $lg[0]; Write-Host (" {0}  " -f $lg[1]) -NoNewline -ForegroundColor Gray }
+  Write-Host ""
   Write-MLine 'state' ("監視開始  ポート {0}" -f $m.port) 'Cyan' 0
   $sw = [Diagnostics.Stopwatch]::StartNew(); $tick = 0L
   $stopAt = if ($WatchMinutes -gt 0) { $WatchMinutes * 60000L } else { [long]::MaxValue }
@@ -309,6 +392,7 @@ function Start-Watch {
   while ($sw.ElapsedMilliseconds -lt $stopAt) {
     $now = $sw.ElapsedMilliseconds
     foreach ($tg in $targets) {
+      if ($Preview) { Process-MSample $tg $now (Get-PreviewRtt $tg.name $now $m.port); continue }
       $p = New-Object System.Net.NetworkInformation.Ping
       $tg.pending.Enqueue([pscustomobject]@{ t = $now; ping = $p; task = $p.SendPingAsync($tg.ip, 1000) })
       while ($tg.pending.Count -gt 0) {
@@ -323,7 +407,7 @@ function Start-Watch {
     }
     if ($tick % 5 -eq 0) { Step-Monitor $now }
     if ($tick % 20 -eq 0) { Show-Status $now }
-    if ($tick % 200 -eq 0) {
+    if ($tick % 200 -eq 0 -and -not $Preview) {
       $svc = Get-Service -Name "WireGuardTunnel`$$name" -ErrorAction SilentlyContinue
       if (-not $svc -or $svc.Status -ne 'Running') { Write-MLine 'state' 'トンネルが停止されたので監視を終了します' 'Gray' $now; break }
     }
@@ -337,6 +421,17 @@ function Start-Watch {
 # ---------- main ----------
 if ($MyInvocation.InvocationName -eq '.') { return }   # dot-sourced (tests): define functions only
 try { $Host.UI.RawUI.WindowTitle = "csvpn - reroll" } catch { }
+if ($Preview) {
+  # Fake tunnel helpers: the monitor screen with synthetic samples; nothing real is touched.
+  $name = 'preview-split'
+  function Set-LivePort([int]$port) { $true }
+  function Set-ConfPort([int]$port) { }
+  function Get-LivePort { $PreviewPort }
+  if ($WatchMinutes -le 0) { $WatchMinutes = 1 }
+  $Log = $null
+  if (-not $Watch) { Header 'reroll (preview)' }
+  Start-Watch; Done 0
+}
 if (-not $Conf) {
   $confs = Get-ChildItem -Path $PSScriptRoot -Filter *.conf | Sort-Object { $_.Name -notlike '*-split.conf' }, Name
   if (-not $confs) { Fail "このフォルダに .conf がありません。start-tunnel.bat と同じフォルダで実行してください。"; Done 1 }
@@ -351,10 +446,7 @@ if (-not $curPort) { Fail "wg.exe でトンネルの状態を読めませんで�
 
 if ($Watch) { Start-Watch; Done 0 }
 
-Write-Host ""
-Rule
-Write-Host "   csvpn  |  reroll  |  試合を切らずに経路だけ変える" -ForegroundColor Cyan
-Rule
+Header 'reroll  //  試合を切らずに経路だけ変える'
 Write-Host ""
 Write-Host "  今の経路を測定 (トンネル内に 30 発、1.5 秒)" -ForegroundColor White
 $cur = Probe $curPort

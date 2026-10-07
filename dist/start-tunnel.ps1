@@ -19,6 +19,7 @@ param(
   [switch]$NoWatch,         # end after setting up instead of staying to monitor the path
   [int]$WatchMinutes = 0,   # testing aid: stop monitoring after N minutes (0 = until the window is closed)
   [switch]$InjectFlow,      # testing aid: passed to reroll.ps1 -Watch (fake tunnel hitches to exercise a switch)
+  [switch]$Preview,         # show the whole screen with fake data; touches nothing (no admin, no tunnel, no files)
   [int]$Candidates = 12,    # ports compared besides the current one (13 in total)
   [int]$SwitchMarginMs = 0, # optional hysteresis: leave a good current port only for a candidate this much better
   [int]$MaxMs = 150,
@@ -28,14 +29,50 @@ param(
 $ErrorActionPreference = 'Continue'
 
 # ---------- screen ----------
-function Rule([string]$c = 'DarkCyan') { Write-Host ("  " + ('=' * 58)) -ForegroundColor $c }
-function Step([int]$n, [string]$text) { Write-Host ""; Write-Host ("  [{0}/5] {1}" -f $n, $text) -ForegroundColor White }
-function Info([string]$t) { Write-Host "        $t" -ForegroundColor Gray }
-function Ok([string]$t) { Write-Host "    OK  $t" -ForegroundColor Green }
-function Warn([string]$t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
-function Fail([string]$t) { Write-Host "    NG  $t" -ForegroundColor Red }
-function Done($code) { if (-not $NoPause) { Write-Host ""; Read-Host "  Enter キーで閉じる" | Out-Null }; exit $code }
+# Plain console features only (16 colours, ASCII, background-coloured spaces), so it looks the same in the classic
+# console and in Windows Terminal on any PC. CJK text takes 2 columns; everything else used here takes 1.
+$UiWidth = 72
+function Get-DisplayWidth([string]$s) {
+  $w = 0
+  foreach ($ch in $s.ToCharArray()) {
+    $c = [int]$ch
+    if (($c -ge 0x1100 -and $c -le 0x115F) -or ($c -ge 0x2E80 -and $c -le 0xA4CF) -or ($c -ge 0xAC00 -and $c -le 0xD7A3) -or
+        ($c -ge 0xF900 -and $c -le 0xFAFF) -or ($c -ge 0xFE30 -and $c -le 0xFE4F) -or ($c -ge 0xFF00 -and $c -le 0xFF60) -or
+        ($c -ge 0xFFE0 -and $c -le 0xFFE6)) { $w += 2 } else { $w++ }
+  }
+  $w
+}
+function PadTo([string]$s, [int]$w) { $s + (' ' * [math]::Max(0, $w - (Get-DisplayWidth $s))) }
+function Badge([string]$text, [string]$bg, [string]$fg = 'Black') { Write-Host " $text " -NoNewline -BackgroundColor $bg -ForegroundColor $fg }
+function Band([string]$text, [string]$bg, [string]$fg = 'White') {
+  # Full-width coloured bar; the line always ends in the default colours so nothing bleeds when the window scrolls.
+  Write-Host "  " -NoNewline
+  Write-Host (PadTo $text $UiWidth) -NoNewline -BackgroundColor $bg -ForegroundColor $fg
+  Write-Host ""
+}
+function Header([string]$sub) {
+  Write-Host ""
+  Band "" 'DarkCyan'
+  Band ("   CSVPN   //   Singapore exit node   //   {0}" -f $sub) 'DarkCyan' 'White'
+  Band "" 'DarkCyan'
+}
+function Step([int]$n, [string]$text) { Write-Host ""; Write-Host "  " -NoNewline; Badge ("STEP {0}/5" -f $n) 'DarkCyan' 'White'; Write-Host "  $text" -ForegroundColor White }
+function Info([string]$t) { Write-Host "         $t" -ForegroundColor Gray }
+function Ok([string]$t) { Write-Host "    " -NoNewline; Badge 'OK' 'DarkGreen' 'White'; Write-Host " $t" -ForegroundColor Green }
+function Warn([string]$t) { Write-Host "    " -NoNewline; Badge '!!' 'DarkYellow' 'Black'; Write-Host " $t" -ForegroundColor Yellow }
+function Fail([string]$t) { Write-Host "    " -NoNewline; Badge 'NG' 'DarkRed' 'White'; Write-Host " $t" -ForegroundColor Red }
+function Summary([string]$color, [string[]]$lines) {
+  $bg = switch ($color) { 'Green' { 'DarkGreen' } 'Yellow' { 'DarkYellow' } default { 'DarkGray' } }
+  $fg = if ($color -eq 'Yellow') { 'Black' } else { 'White' }
+  Write-Host ""
+  Band "" $bg $fg
+  foreach ($l in $lines) { Band "   $l" $bg $fg }
+  Band "" $bg $fg
+}
+function Done($code) { if (-not $NoPause) { Write-Host ""; Write-Host "  " -NoNewline; Badge 'Enter' 'DarkGray' 'White'; Read-Host " キーで閉じる" | Out-Null }; exit $code }
 try { $Host.UI.RawUI.WindowTitle = "csvpn - start-tunnel" } catch { }
+
+if ($Preview) { $NoUpdate = $true; $NoSelfUpdate = $true }
 
 # ---------- self-update ----------
 # Fetch the latest copy of this script (and reroll.{ps1,bat}) from the public repo; re-run if this script changed.
@@ -83,13 +120,15 @@ $wg    = "C:\Program Files\WireGuard\wg.exe"
 $gw    = "10.66.0.1"
 $store = "C:\Program Files\WireGuard\Data\Configurations"
 
-Write-Host ""
-Rule
-Write-Host "   csvpn  |  Singapore exit node  |  WireGuard" -ForegroundColor Cyan
-Rule
+Header 'start-tunnel'
 
 # ---------- 1. prepare ----------
 Step 1 "準備"
+if ($Preview) {
+  $name = 'preview-split'
+  Info "プレビュー: 偽のデータで画面だけ流します (トンネル・設定・WireGuard には触りません)"
+  Ok "宛先リストは最新です (150 件)"
+} else {
 if (-not (Test-Path $wgui)) {
   Info "WireGuard が見つからないのでインストールします..."
   winget install --id WireGuard.WireGuard -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
@@ -123,6 +162,7 @@ if (-not $NoUpdate -and $curAip -ne '0.0.0.0/0') {
       } else { Ok ("宛先リストは最新です ({0} 件)" -f $cidrs.Count) }
     } else { Warn "宛先リストの取得結果が小さすぎるので無視します" }
   } catch { Warn "宛先リストの取得に失敗 (オフライン?)。今の設定のまま続けます" }
+}
 }
 
 # ---------- tunnel helpers ----------
@@ -191,16 +231,29 @@ function Probe([int]$port, [int]$n = 30, [int]$intervalMs = 50) {
   [pscustomobject]@{ port = $port; min = $ok[0]; p90 = $p90; lost = $lost; score = $p90 + 20 * $lost }
 }
 function Test-Good($r) { $r.min -ge 0 -and $r.lost -eq 0 -and $r.min -lt $MaxMs -and ($r.p90 - $r.min) -le $JitterMs }
+function Get-Quality($r) {
+  if ($r.min -lt 0) { return @('応答なし', 'DarkRed', 'White') }
+  if ($r.min -ge $MaxMs) { return @('外れ経路', 'DarkRed', 'White') }
+  if (-not (Test-Good $r)) { return @('揺れ/ロス', 'DarkYellow', 'Black') }
+  @('良好', 'DarkGreen', 'White')
+}
+function Write-Bar($r, [int]$cells = 25) {
+  # 90th percentile on a 70..120 ms scale (2 ms per cell) in the quality colour, on a dark track.
+  $q = Get-Quality $r
+  $n = if ($r.p90 -gt 0) { [math]::Max(1, [math]::Min($cells, [int][math]::Round(($r.p90 - 70) / 2.0))) } else { 0 }
+  if ($n -gt 0) { Write-Host (' ' * $n) -NoNewline -BackgroundColor $q[1] }
+  if ($cells -gt $n) { Write-Host (' ' * ($cells - $n)) -NoNewline -BackgroundColor DarkGray }
+}
+function Write-Numbers($r, [string]$fc = 'White') {
+  if ($r.min -lt 0) { Write-Host "    -- /  -- ms  ロス--  " -NoNewline -ForegroundColor DarkGray }
+  else { Write-Host ("  {0,3} / {1,3} ms  ロス{2,2}  " -f $r.min, $r.p90, $r.lost) -NoNewline -ForegroundColor $fc }
+}
 function Show-Probe($r, [string]$label) {
-  if ($r.min -lt 0) { $q = '応答なし'; $c = 'DarkRed' }
-  elseif ($r.min -ge $MaxMs) { $q = '外れ経路'; $c = 'Red' }
-  elseif (-not (Test-Good $r)) { $q = '揺れ/ロス'; $c = 'Yellow' }
-  else { $q = '良好'; $c = 'Green' }
-  $bar = if ($r.p90 -gt 0) { '#' * [math]::Min(30, [math]::Max(1, [int]($r.p90 / 10))) } else { '' }
-  Write-Host ("        {0,-4} ポート {1,5}  " -f $label, $r.port) -NoNewline -ForegroundColor Gray
-  Write-Host ("{0,-30}" -f $bar) -NoNewline -ForegroundColor $c
-  if ($r.min -lt 0) { Write-Host "  ----" -NoNewline -ForegroundColor $c } else { Write-Host ("  {0,3}/{1,3} ms  ロス {2,-2}" -f $r.min, $r.p90, $r.lost) -NoNewline -ForegroundColor White }
-  Write-Host ("  [{0}]" -f $q) -ForegroundColor $c
+  $q = Get-Quality $r
+  Write-Host ("    {0}  {1,5}  " -f $label, $r.port) -NoNewline -ForegroundColor Gray
+  Write-Bar $r
+  Write-Numbers $r
+  Badge $q[0] $q[1] $q[2]; Write-Host ""
 }
 function Set-LivePort([int]$port) {
   # Apply the port and read it back; a failed `wg set` must not be mistaken for a measured path.
@@ -216,11 +269,52 @@ function Select-Port($results, [int]$curPort) {
   $pool = if ($good.Count) { $good } else { @($results) }
   @($pool | Sort-Object score, min, @{ Expression = { if ($_.port -eq $curPort) { 0 } else { 1 } } })
 }
-function Summary([string]$color, [string[]]$lines) {
+function Show-Strip($results, [int]$total) {
+  # One line rewritten in place while the ports are measured: a coloured cell per port, grey ones still to come.
+  Write-Host "`r    測定中  " -NoNewline -ForegroundColor White
+  foreach ($r in $results) { Write-Host '  ' -NoNewline -BackgroundColor (Get-Quality $r)[1]; Write-Host ' ' -NoNewline }
+  for ($i = $results.Count; $i -lt $total; $i++) { Write-Host '  ' -NoNewline -BackgroundColor DarkGray; Write-Host ' ' -NoNewline }
+  Write-Host ("  {0,2} / {1} ポート" -f $results.Count, $total) -NoNewline -ForegroundColor Gray
+}
+function Show-Ranking($results, $ranked, [int]$curPort) {
+  # Good ports in rank order first, then the rest by score.
+  $rest = @($results | Where-Object { $p = $_.port; -not ($ranked | Where-Object { $_.port -eq $p }) } | Sort-Object score, min)
+  $rows = @($ranked) + $rest
   Write-Host ""
-  Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
-  foreach ($l in $lines) { Write-Host "   $l" -ForegroundColor $color }
-  Write-Host ("  " + ('-' * 58)) -ForegroundColor $color
+  Write-Host ("    " + (PadTo '順位' 5) + (PadTo 'ポート' 8) + (PadTo '90% 値 (左ほど速くて安定)' 25) + (PadTo '  最小 / 90%' 16) + (PadTo 'ロス' 8) + '判定') -ForegroundColor DarkGray
+  $i = 0
+  foreach ($r in $rows) {
+    $i++
+    $q = Get-Quality $r
+    $fc = if ($i -eq 1) { 'White' } else { 'Gray' }
+    Write-Host ("    {0,3}  {1,6}  " -f $i, $r.port) -NoNewline -ForegroundColor $fc
+    Write-Bar $r
+    Write-Numbers $r $fc
+    Badge $q[0] $q[1] $q[2]
+    if ($r.port -eq $curPort) { Write-Host "  <- 今のポート" -NoNewline -ForegroundColor Cyan }
+    Write-Host ""
+  }
+}
+
+if ($Preview) {
+  # Fake tunnel helpers: same screens, nothing real is touched.
+  $script:pvRand = New-Object System.Random
+  $script:pvLive = 50720
+  function Install-FromStore { Start-Sleep -Milliseconds 900 }
+  function Wait-Tunnel { $true }
+  function Get-LivePort { $script:pvLive }
+  function Set-LivePort([int]$port) { Start-Sleep -Milliseconds 60; $script:pvLive = $port; $true }
+  function Set-ConfPort([int]$port) { }
+  function Get-ConfPort { 50720 }
+  function Probe([int]$port, [int]$n = 30, [int]$intervalMs = 50) {
+    Start-Sleep -Milliseconds ([int]($n * $intervalMs * 0.7))
+    $k = $script:pvRand.Next(0, 13)
+    if ($k -eq 0) { $min = 246 + $script:pvRand.Next(0, 8); $p90 = $min + $script:pvRand.Next(1, 6); $lost = 0 }   # the 250 ms link
+    elseif ($k -eq 1) { $min = 79 + $script:pvRand.Next(0, 2); $p90 = $min + 18 + $script:pvRand.Next(0, 10); $lost = 0 }   # jittery
+    elseif ($k -eq 2) { $min = 80; $p90 = 82; $lost = 1 + $script:pvRand.Next(0, 2) }   # lossy
+    else { $min = 78 + $script:pvRand.Next(0, 4); $p90 = $min + $script:pvRand.Next(0, 3); $lost = 0 }
+    [pscustomobject]@{ port = $port; min = $min; p90 = $p90; lost = $lost; score = $p90 + 20 * $lost }
+  }
 }
 
 function Start-Monitor([int]$code, [int[]]$prefer = @()) {
@@ -233,6 +327,7 @@ function Start-Monitor([int]$code, [int[]]$prefer = @()) {
   if ($WatchMinutes -gt 0) { $a.WatchMinutes = $WatchMinutes }
   if ($InjectFlow) { $a.InjectFlow = $true }
   if ($prefer.Count) { $a.PreferPorts = $prefer }   # ports that measured good: first choices when switching
+  if ($Preview) { $a.Preview = $true; $a.PreviewPort = (Get-LivePort); if (-not $a.WatchMinutes) { $a.WatchMinutes = 1 } }
   & $rr @a
   Done $code
 }
@@ -240,8 +335,10 @@ function Start-Monitor([int]$code, [int[]]$prefer = @()) {
 # ---------- 2. register ----------
 Step 2 "トンネルを登録"
 Install-FromStore
-$svc = Get-Service -Name "WireGuardTunnel`$$name" -ErrorAction SilentlyContinue
-if (-not $svc -or $svc.Status -ne 'Running') { Fail "トンネルを開始できませんでした。.conf の内容を確認してください。"; Done 1 }
+if (-not $Preview) {
+  $svc = Get-Service -Name "WireGuardTunnel`$$name" -ErrorAction SilentlyContinue
+  if (-not $svc -or $svc.Status -ne 'Running') { Fail "トンネルを開始できませんでした。.conf の内容を確認してください。"; Done 1 }
+}
 Ok "トンネル '$name' を開始しました (WireGuard アプリの一覧にも出ます)"
 if (-not (Wait-Tunnel)) {
   Fail "出口ノードが応答しません。ノードの稼働時間は 19:00〜02:00 (JST) です。"
@@ -255,20 +352,22 @@ $curPort = Get-LivePort
 if (-not $curPort) { Fail "wg.exe でトンネルの状態を読めませんでした (管理者権限で実行していますか?)"; Done 1 }
 $cur = Probe $curPort 20 40     # same probe size as the candidates, so their p90s compare fairly
 if ($AssumeCurrentBad) { $cur.lost = $cur.lost + 30; $cur.score = 99999; Info "-AssumeCurrentBad: 今の経路を悪いとみなします (テスト用)" }
-Show-Probe $cur "現在"
 $results = @($cur)
+Show-Strip $results ($Candidates + 1)
 foreach ($port in (Get-Random -Count $Candidates -InputObject (40000..60000) | Where-Object { $_ -ne $curPort })) {
-  if (-not (Set-LivePort $port)) { Warn ("ポート {0} への切り替えに失敗したので飛ばします" -f $port); continue }
+  if (-not (Set-LivePort $port)) { Write-Host ""; Warn ("ポート {0} への切り替えに失敗したので飛ばします" -f $port); continue }
   Start-Sleep -Milliseconds 200
   $r = Probe $port 20 40      # 20 echoes in 0.8 s per candidate; the winner is re-checked with the full probe
-  Show-Probe $r "候補"
   $results += $r
+  Show-Strip $results ($Candidates + 1)
 }
+Write-Host ""
 # Bad ports only count if nothing is good.
 $ranked = Select-Port $results $curPort
 $pick = $ranked[0]
 if ($SwitchMarginMs -gt 0 -and (Test-Good $cur) -and $pick.port -ne $curPort -and $pick.score -gt $cur.score - $SwitchMarginMs) { $pick = $cur }
 $runnerUp = $ranked | Where-Object { $_.port -ne $pick.port } | Select-Object -First 1
+Show-Ranking $results $ranked $curPort
 
 # ---------- 4. apply ----------
 Step 4 "適用"
