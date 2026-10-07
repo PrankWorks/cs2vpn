@@ -28,7 +28,7 @@ param(
   [int]$Minutes = 0,
   [string]$Gateway = "10.66.0.1",
   [string]$Endpoint,
-  [string]$Log = (Join-Path $env:LOCALAPPDATA "csvpn\lag-watch.csv")
+  [string]$Log = (Join-Path $PSScriptRoot "logs\lag-watch.csv")   # next to the script, not in AppData
 )
 $ErrorActionPreference = 'Stop'
 $TickMs = 50

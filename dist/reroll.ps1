@@ -34,7 +34,7 @@ param(
   [int]$MergeMs = 150,
   [int]$RateCount = 3,
   [int]$RateWindowSec = 180,
-  [string]$Log = (Join-Path $env:LOCALAPPDATA "csvpn\monitor.csv")
+  [string]$Log = (Join-Path $PSScriptRoot "logs\monitor.csv")   # next to the scripts, not in AppData
 )
 $ErrorActionPreference = 'Continue'
 $wg = "C:\Program Files\WireGuard\wg.exe"
